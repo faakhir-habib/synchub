@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Conflicts · SyncHub</title>
+  <link rel="stylesheet" href="assets/css/theme.css">
+</head>
+<body>
+<div class="app-shell">
+<aside class="sidebar">
+  <a class="brand" href="dashboard.html">
+    <div class="brand-mark"></div>
+    <div class="brand-copy"><strong>SyncHub</strong><span>Workspace sync</span></div>
+  </a>
+  <div class="nav-label">Workspace</div>
+  <nav class="nav">
+    <a class="nav-link" href="dashboard.html"><svg data-icon="dashboard"></svg><span>Dashboard</span></a>
+    <a class="nav-link" href="projects.html"><svg data-icon="folder"></svg><span>Projects</span></a>
+    <a class="nav-link" href="machines.html"><svg data-icon="monitor"></svg><span>Machines</span></a>
+    <a class="nav-link" href="conflicts.html"><svg data-icon="alert"></svg><span>Conflicts</span><span class="nav-count">2</span></a>
+  </nav>
+  <div class="nav-label">Account</div>
+  <nav class="nav">
+    <a class="nav-link" href="notifications.html"><svg data-icon="bell"></svg><span>Notifications</span><span class="nav-count">3</span></a>
+    <a class="nav-link" href="settings.html"><svg data-icon="settings"></svg><span>Settings</span></a>
+  </nav>
+  <div class="sidebar-bottom">
+    <div class="sidebar-status">
+      <div class="status-row"><span class="status-label">Sync service</span><span class="live-dot">Operational</span></div>
+      <div class="status-row"><span class="status-label">Last heartbeat</span><span>4s ago</span></div>
+    </div>
+    <a class="nav-link" href="profile.html"><div class="avatar">IN</div><span>Idrees Nazir</span><svg data-icon="chevron" style="margin-left:auto"></svg></a>
+  </div>
+</aside>
+<main class="main">
+<header class="topbar">
+  <div class="topbar-left">
+    <button class="mobile-menu" aria-label="Open navigation"><svg data-icon="menu"></svg></button>
+    <div><div class="page-kicker">SyncHub Console</div><div class="page-title">Conflicts</div></div>
+  </div>
+  <div class="topbar-actions">
+    <a class="icon-button" href="notifications.html" aria-label="Notifications"><svg data-icon="bell"></svg><span class="notification-dot"></span></a>
+    <a class="user-chip" href="profile.html"><div class="avatar">IN</div><div class="user-meta"><strong>Idrees Nazir</strong><span>Workspace admin</span></div></a>
+  </div>
+</header><section class="content"><div class="page-heading"><div><h1>Conflict resolution</h1><p>Compare diverging file versions and choose the version that should become the new synchronized source.</p></div><div class="heading-actions"><button class="btn btn-secondary"><svg data-icon="arrow" style="transform:rotate(180deg)"></svg>Previous</button><button class="btn btn-secondary">Next<svg data-icon="arrow"></svg></button></div></div>
+<div class="conflict-shell">
+  <div class="card">
+    <div class="conflict-titlebar"><div class="file-path"><div class="item-icon"><svg data-icon="file"></svg></div><div><strong>src/server.js</strong><span>my-app · conflict detected 9 minutes ago</span></div></div><span class="badge badge-red">Unresolved</span></div>
+    <div class="diff-grid">
+      <div class="code-pane"><div class="code-head"><div><strong>MacBook Pro</strong><span>Local version</span></div><span>14:32:08</span></div><div class="code-lines"><div class="code-line"><span>1</span><code>import express from 'express';</code></div><div class="code-line"><span>2</span><code>const app = express();</code></div><div class="code-line"><span>3</span><code></code></div><div class="code-line removed"><span>4</span><code>const port = 3000;</code></div><div class="code-line"><span>5</span><code>app.listen(port, () =&gt; {</code></div><div class="code-line"><span>6</span><code>  console.log(`Running on ${port}`);</code></div><div class="code-line"><span>7</span><code>});</code></div></div></div>
+      <div class="code-pane"><div class="code-head"><div><strong>Build Server</strong><span>Remote version</span></div><span>14:32:11</span></div><div class="code-lines"><div class="code-line"><span>1</span><code>import express from 'express';</code></div><div class="code-line"><span>2</span><code>const app = express();</code></div><div class="code-line"><span>3</span><code></code></div><div class="code-line added"><span>4</span><code>const port = 4000;</code></div><div class="code-line"><span>5</span><code>app.listen(port, () =&gt; {</code></div><div class="code-line"><span>6</span><code>  console.log(`Running on ${port}`);</code></div><div class="code-line"><span>7</span><code>});</code></div></div></div>
+    </div>
+  </div>
+  <div class="stack">
+    <div class="card"><div class="card-head"><div><h3>Resolve conflict</h3><p>Select the source of truth</p></div></div><div class="card-body"><div class="resolve-options"><div class="resolve-option"><strong>Keep MacBook Pro version</strong><p>Use port 3000 and push this version to all machines.</p><button class="btn btn-secondary btn-sm" data-toast="MacBook Pro version selected">Use local</button></div><div class="resolve-option"><strong>Keep Build Server version</strong><p>Use port 4000 and push this version to all machines.</p><button class="btn btn-secondary btn-sm" data-toast="Build Server version selected">Use remote</button></div><div class="resolve-option"><strong>Resolve manually</strong><p>Create an editable merged version before syncing.</p><button class="btn btn-sm" data-toast="Manual merge opened">Open merge editor</button></div></div></div></div>
+    <div class="card"><div class="card-head"><div><h3>Conflict details</h3></div></div><div class="card-body"><div class="status-row"><span class="status-label">Project</span><span>my-app</span></div><div class="status-row"><span class="status-label">Branch</span><span>main</span></div><div class="status-row"><span class="status-label">Affected machines</span><span>2</span></div><div class="status-row"><span class="status-label">Detected</span><span>9m ago</span></div></div></div>
+  </div>
+</div>
+</section></main></div>
+<script src="assets/js/app.js"></script>
+</body>
+</html>
