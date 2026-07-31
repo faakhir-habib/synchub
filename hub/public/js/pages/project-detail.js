@@ -2,7 +2,7 @@ import { Session, initShell, timeAgo, esc, renderIcons, rebind, toast, modalForm
 
 const id = Number(new URLSearchParams(location.search).get("id"));
 await initShell({ onChanged: (m) => { if (m.projectId === id) load(); } });
-if (!id) { toast("No project id"); } else { await load(); }
+if (!id) { location.href = "/projects.html"; } else { await load(); }
 
 let detail = null;
 
@@ -107,7 +107,7 @@ function wireActions(d, machines) {
   });
 
   // Add machine -> modal (pick machine + path)
-  rebind(document.querySelector(".dashboard-grid .btn.btn-secondary.btn-sm"), "click", async (e) => {
+  rebind(document.querySelector("#add-machine-btn"), "click", async (e) => {
     e.preventDefault();
     const mapped = new Set(d.mappings.map((x) => x.machine_id));
     const available = machines.filter((m) => !mapped.has(m.id));
