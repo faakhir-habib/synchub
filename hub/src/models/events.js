@@ -11,3 +11,9 @@ export function recent(db, userId, limit = 20) {
     "SELECT * FROM events WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ?"
   ).all(userId, limit);
 }
+
+export function recentForProject(db, projectId, limit = 10) {
+  return db.prepare(
+    "SELECT * FROM events WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT ?"
+  ).all(projectId, limit);
+}
