@@ -6,7 +6,7 @@ import * as machines from "../models/machines.js";
 import * as conflicts from "../models/conflicts.js";
 import * as fileState from "../models/fileState.js";
 import * as events from "../models/events.js";
-import * as notifications from "../models/notifications.js";
+import { notifyUser } from "../lib/notify.js";
 
 export function projectRoutes(db, store, realtime = null) {
   const r = Router();
@@ -55,11 +55,10 @@ export function projectRoutes(db, store, realtime = null) {
     }
     store.remove(req.user.id, p.id, candidateName);
     conflicts.resolve(db, c.id);
-    const note = notifications.record(db, {
+    notifyUser(db, realtime, {
       user_id: req.user.id, type: "sync",
       title: `Conflict resolved: ${c.filename}`, body: `Kept the ${choice} version.`,
     });
-    realtime?.pushNotification(req.user.id, note);
     // Fan the now-canonical content out to the project's other machines.
     if (choice === "candidate") {
       realtime?.notifyProjectChanged(p.id, { filename: c.filename, hash: c.candidate_hash });
