@@ -1,6 +1,7 @@
 import express from "express";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
 import { openDb } from "./db.js";
 import { createRelayStore } from "./lib/relayStore.js";
 import { createRealtime } from "./lib/realtime.js";
@@ -26,12 +27,30 @@ export function createApp(db = openDb(), opts = {}) {
   app.locals.store = store;
   app.locals.realtime = realtime;
   app.use(express.json({ limit: "25mb" }));
-  // Always revalidate HTML/JS/CSS so deploys are picked up immediately (no stale UI).
-  app.use(express.static(join(__dirname, "..", "public"), {
+
+  const publicDir = join(__dirname, "..", "public");
+  // Per-boot build id → changes on every deploy/restart, busting CDN + browser cache.
+  const BUILD = process.env.BUILD_ID || String(Date.now());
+
+  // Serve HTML with a version stamped onto every asset URL (and an import map so
+  // ES-module imports are versioned too). HTML itself is never cached, so a new
+  // deploy is picked up immediately even behind Cloudflare.
+  app.get(/.*\.html$/, (req, res, next) => {
+    let html;
+    try { html = readFileSync(join(publicDir, req.path), "utf8"); } catch { return next(); }
+    html = html.replace(/\b(src|href)="((?:\/|)(?:js|assets)\/[^"?]+\.(?:js|css))"/g, `$1="$2?v=${BUILD}"`);
+    const importmap = `<script type="importmap">{"imports":{`
+      + `"/js/session.js":"/js/session.js?v=${BUILD}",`
+      + `"/js/app-shell.js":"/js/app-shell.js?v=${BUILD}"}}</script>`;
+    html = html.replace('<script src="assets/js/app.js', importmap + '<script src="assets/js/app.js');
+    res.set("Cache-Control", "no-store").type("html").send(html);
+  });
+
+  app.use(express.static(publicDir, {
     etag: true,
     lastModified: true,
     setHeaders: (res, filePath) => {
-      if (/\.(html|js|css)$/.test(filePath)) res.setHeader("Cache-Control", "no-cache");
+      if (/\.(js|css)$/.test(filePath)) res.setHeader("Cache-Control", "no-cache");
     },
   }));
 
