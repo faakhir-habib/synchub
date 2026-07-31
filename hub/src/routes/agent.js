@@ -11,8 +11,11 @@ import * as notifications from "../models/notifications.js";
 
 // Agent-facing sync endpoints. Auth via X-Machine-Token (req.machine).
 // `store` is a relay store instance (see lib/relayStore.js).
-export function agentRoutes(db, store) {
+export function agentRoutes(db, store, realtime = null) {
   const r = Router();
+  const fanOut = (projectId, filename, hash, excludeMachineId) =>
+    realtime?.notifyProjectChanged(projectId, { filename, hash, excludeMachineId });
+  const notify = (userId, note) => realtime?.pushNotification(userId, note);
 
   function touch(machine) {
     db.prepare("UPDATE machines SET last_seen_at = datetime('now'), status = 'online' WHERE id = ?")
@@ -94,11 +97,13 @@ export function agentRoutes(db, store) {
           const c = conflicts.open(db, projectId, filename, req.machine.id, finalHash);
           conflicts.resolve(db, c.id);
           db.prepare("UPDATE conflicts SET auto_merged = 1 WHERE id = ?").run(c.id);
-          notifications.record(db, {
+          const note = notifications.record(db, {
             user_id: userId, type: "sync", title: `Auto-merged ${filename}`,
             body: `Diverging edits to ${filename} were merged automatically.`,
           });
+          notify(userId, note);
         }
+        fanOut(projectId, filename, finalHash, req.machine.id);
         touch(req.machine);
         return res.json({ status: m.kind === "merged" ? "merged" : "accepted", hash: finalHash });
       }
@@ -107,10 +112,11 @@ export function agentRoutes(db, store) {
       const candidateName = conflicts.candidateFilename(filename, newHash);
       store.write(userId, projectId, candidateName, content);
       const c = conflicts.open(db, projectId, filename, req.machine.id, newHash);
-      notifications.record(db, {
+      const note = notifications.record(db, {
         user_id: userId, type: "conflict", title: `Conflict in ${filename}`,
         body: `${filename} diverged and needs manual resolution.`,
       });
+      notify(userId, note);
       events.record(db, {
         user_id: userId, machine_id: req.machine.id, project_id: projectId,
         type: "conflict", filename, bytes: Buffer.byteLength(content, "utf8"),
@@ -131,6 +137,7 @@ export function agentRoutes(db, store) {
       filename,
       bytes: size,
     });
+    fanOut(projectId, filename, newHash, req.machine.id);
     touch(req.machine);
     res.json({ status: "accepted", hash: newHash });
   });

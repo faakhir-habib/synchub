@@ -14,10 +14,16 @@ export async function startTestServer(app = testApp()) {
   const server = await new Promise((resolve) => {
     const s = app.listen(0, () => resolve(s));
   });
+  if (app.locals.realtime) app.locals.realtime.attach(server);
   const { port } = server.address();
   return {
     url: `http://127.0.0.1:${port}`,
-    close: () => new Promise((r) => server.close(r)),
+    wsUrl: `ws://127.0.0.1:${port}`,
+    close: () => new Promise((r) => {
+      try { app.locals.realtime?.close(); } catch {}
+      server.closeAllConnections?.();
+      server.close(r);
+    }),
   };
 }
 

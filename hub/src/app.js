@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { openDb } from "./db.js";
 import { createRelayStore } from "./lib/relayStore.js";
+import { createRealtime } from "./lib/realtime.js";
 import { authRoutes } from "./routes/auth.js";
 import { machineRoutes, pairRedeemRoutes } from "./routes/machines.js";
 import { projectRoutes } from "./routes/projects.js";
@@ -16,10 +17,12 @@ export function createApp(db = openDb(), opts = {}) {
     || process.env.RELAY_STORE_DIR
     || join(__dirname, "..", "relay-store");
   const store = createRelayStore(relayDir);
+  const realtime = createRealtime(db);
 
   const app = express();
   app.locals.db = db;
   app.locals.store = store;
+  app.locals.realtime = realtime;
   app.use(express.json({ limit: "25mb" }));
   app.use(express.static(join(__dirname, "..", "public")));
 
@@ -27,8 +30,8 @@ export function createApp(db = openDb(), opts = {}) {
   app.use("/api/auth", authRoutes(db));
   app.use("/api/machines", machineRoutes(db));
   app.use("/api/agent", pairRedeemRoutes(db));
-  app.use("/api/agent", agentRoutes(db, store));
-  app.use("/api/projects", projectRoutes(db, store));
+  app.use("/api/agent", agentRoutes(db, store, realtime));
+  app.use("/api/projects", projectRoutes(db, store, realtime));
   app.use("/api/conflicts", conflictRoutes(db));
 
   app.get("/", (_req, res) => res.redirect("/login.html"));
