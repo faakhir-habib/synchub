@@ -23,11 +23,22 @@ export const Session = {
   },
 };
 
-// Fills common chrome (sidebar/topbar user name + avatar initials) from /me.
+// Display name = the user's set name, else the part before @ in their email.
+export function displayName(me) {
+  const n = (me?.name || "").trim();
+  if (n) return n;
+  return (me?.email || "").split("@")[0] || "Account";
+}
+
+// Fills common chrome (sidebar/topbar name + avatar initials, chip email) from /me.
 export function applyUserChrome(me) {
   if (!me) return;
-  const initials = me.email.slice(0, 2).toUpperCase();
-  document.querySelectorAll(".avatar").forEach((el) => { el.textContent = initials; });
-  document.querySelectorAll(".user-chip strong, .sidebar-bottom .nav-link > span")
-    .forEach((el) => { el.textContent = me.email; });
+  const name = displayName(me);
+  const initials = name.replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase() || "U";
+  document.querySelectorAll(".avatar, .profile-avatar").forEach((el) => { el.textContent = initials; });
+  // Topbar chip: bold name + email subtitle
+  document.querySelectorAll(".user-chip .user-meta strong").forEach((el) => { el.textContent = name; });
+  document.querySelectorAll(".user-chip .user-meta span").forEach((el) => { el.textContent = me.email; });
+  // Sidebar bottom link: just the name
+  document.querySelectorAll(".sidebar-bottom .nav-link > span").forEach((el) => { el.textContent = name; });
 }

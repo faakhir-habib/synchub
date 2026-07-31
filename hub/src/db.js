@@ -15,5 +15,9 @@ export function openDb(path = process.env.DB_PATH || join(__dirname, "..", "data
   db.exec("PRAGMA foreign_keys = ON");
   const schema = readFileSync(join(__dirname, "schema.sql"), "utf8");
   db.exec(schema);
+  // Lightweight migrations (idempotent — ignore "duplicate column" on re-run).
+  for (const mig of ["ALTER TABLE users ADD COLUMN name TEXT"]) {
+    try { db.exec(mig); } catch { /* already applied */ }
+  }
   return db;
 }
