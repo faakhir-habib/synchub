@@ -32,7 +32,24 @@ export async function runAgent({ config, statePath }, log = () => {}) {
     }
   }, log);
 
+  // Periodically re-reconcile so newly mapped/unmapped projects (or projects
+  // added in the UI after the agent started) are picked up without a restart.
+  const key = (ms) => ms.map((m) => `${m.project_id}:${m.local_path}:${m.sync_mode}`).sort().join("|");
+  const timer = setInterval(async () => {
+    try {
+      const next = await reconcileAll(api, state, log, notify);
+      if (key(next) !== key(mappings)) {
+        log(`mappings changed — now watching ${next.length} project(s)`);
+        await watch.close();
+        mappings = next;
+        watch = watchProjects(api, state, mappings, log, notify);
+      } else {
+        mappings = next;
+      }
+    } catch (e) { log(`reconcile loop error: ${e.message}`); }
+  }, 30000);
+
   return {
-    stop: async () => { await watch.close(); ws.close(); },
+    stop: async () => { clearInterval(timer); await watch.close(); ws.close(); },
   };
 }
