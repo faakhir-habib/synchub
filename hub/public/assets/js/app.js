@@ -33,18 +33,21 @@ const icons = {
   trash: '<path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6"/>',
 };
 
-document.querySelectorAll('[data-icon]').forEach(el => {
-  const name = el.dataset.icon;
-  if (!icons[name]) return;
-  el.classList.add('icon');
-  el.setAttribute('viewBox', '0 0 24 24');
-  el.setAttribute('fill', 'none');
-  el.setAttribute('stroke', 'currentColor');
-  el.setAttribute('stroke-width', '1.8');
-  el.setAttribute('stroke-linecap', 'round');
-  el.setAttribute('stroke-linejoin', 'round');
-  el.innerHTML = icons[name];
-});
+function renderIcons(root = document) {
+  root.querySelectorAll('[data-icon]').forEach(el => {
+    const name = el.dataset.icon;
+    if (!icons[name] || el.classList.contains('icon')) return;
+    el.classList.add('icon');
+    el.setAttribute('viewBox', '0 0 24 24');
+    el.setAttribute('fill', 'none');
+    el.setAttribute('stroke', 'currentColor');
+    el.setAttribute('stroke-width', '1.8');
+    el.setAttribute('stroke-linecap', 'round');
+    el.setAttribute('stroke-linejoin', 'round');
+    el.innerHTML = icons[name];
+  });
+}
+renderIcons(document);
 
 const current = location.pathname.split('/').pop() || 'dashboard.html';
 document.querySelectorAll('.nav-link').forEach(link => {
@@ -104,3 +107,6 @@ document.querySelectorAll('[data-copy]').forEach(btn => btn.addEventListener('cl
   try { await navigator.clipboard.writeText(target.value || target.textContent); toast('Copied to clipboard'); }
   catch { toast('Copy unavailable in this browser'); }
 }));
+
+// Exposed so dynamically-injected content (page modules) can render icons + toast.
+window.SyncHubUI = { icons, toast, renderIcons };

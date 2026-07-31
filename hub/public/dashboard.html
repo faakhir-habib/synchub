@@ -68,11 +68,6 @@
 </div>
 </section></main></div>
 <script src="assets/js/app.js"></script>
-<script type="module">
-import { Session, applyUserChrome } from "/js/session.js";
-Session.requireAuth();
-const me = await Session.api("GET", "/api/auth/me");
-applyUserChrome(me);
-</script>
+<script type="module" src="/js/pages/dashboard.js"></script>
 </body>
 </html>
