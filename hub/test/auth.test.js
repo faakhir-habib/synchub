@@ -31,6 +31,19 @@ test("signup then me returns the user; bad login rejected", async () => {
   }
 });
 
+test("signup with name stores it", async () => {
+  const srv = await startTestServer();
+  try {
+    const r = await api(srv.url, "POST", "/api/auth/signup", { body: { name: "Faakhir Habib", email: "s@n.com", password: "pw123456" } });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.user.name, "Faakhir Habib");
+    const me = await api(srv.url, "GET", "/api/auth/me", { token: r.body.token });
+    assert.equal(me.body.name, "Faakhir Habib");
+  } finally {
+    await srv.close();
+  }
+});
+
 test("PUT /me updates name; GET /me returns it", async () => {
   const srv = await startTestServer();
   try {

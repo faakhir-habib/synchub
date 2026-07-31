@@ -8,7 +8,7 @@ export function authRoutes(db) {
   const r = Router();
 
   r.post("/signup", (req, res) => {
-    const { email, password } = req.body || {};
+    const { email, password, name } = req.body || {};
     if (!email || !password || password.length < 6) {
       return res.status(400).json({ error: "email and password (>=6 chars) required" });
     }
@@ -16,9 +16,11 @@ export function authRoutes(db) {
       return res.status(409).json({ error: "email already registered" });
     }
     const { hash, salt } = hashPassword(password);
-    const user = users.createUser(db, email, hash, salt);
+    let user = users.createUser(db, email, hash, salt);
+    const trimmed = (name ?? "").toString().trim().slice(0, 120);
+    if (trimmed) user = users.updateProfile(db, user.id, { name: trimmed });
     const token = sessions.createSession(db, user.id);
-    res.status(201).json({ token, user: { id: user.id, email: user.email } });
+    res.status(201).json({ token, user: { id: user.id, email: user.email, name: user.name ?? null } });
   });
 
   r.post("/login", (req, res) => {
