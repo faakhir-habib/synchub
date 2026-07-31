@@ -8,7 +8,7 @@ import * as fileState from "../models/fileState.js";
 import * as events from "../models/events.js";
 import * as notifications from "../models/notifications.js";
 
-export function projectRoutes(db, store) {
+export function projectRoutes(db, store, realtime = null) {
   const r = Router();
 
   // List open conflicts for a project.
@@ -16,6 +16,15 @@ export function projectRoutes(db, store) {
     const p = projects.findOwned(db, req.user.id, Number(req.params.id));
     if (!p) return res.status(404).json({ error: "not found" });
     res.json(conflicts.listOpenForProject(db, p.id));
+  });
+
+  // Manual-mode "Sync now": ask every mapped agent to reconcile this project.
+  r.post("/:id/sync-now", requireUser(db), (req, res) => {
+    const p = projects.findOwned(db, req.user.id, Number(req.params.id));
+    if (!p) return res.status(404).json({ error: "not found" });
+    realtime?.triggerSync(p.id);
+    events.record(db, { user_id: req.user.id, project_id: p.id, type: "sync_now" });
+    res.json({ status: "triggered" });
   });
 
   // Resolve a conflict by keeping the "candidate" (pushed) or "canonical" version.
@@ -46,10 +55,15 @@ export function projectRoutes(db, store) {
     }
     store.remove(req.user.id, p.id, candidateName);
     conflicts.resolve(db, c.id);
-    notifications.record(db, {
+    const note = notifications.record(db, {
       user_id: req.user.id, type: "sync",
       title: `Conflict resolved: ${c.filename}`, body: `Kept the ${choice} version.`,
     });
+    realtime?.pushNotification(req.user.id, note);
+    // Fan the now-canonical content out to the project's other machines.
+    if (choice === "candidate") {
+      realtime?.notifyProjectChanged(p.id, { filename: c.filename, hash: c.candidate_hash });
+    }
     res.json({ status: "resolved", choice });
   });
 
