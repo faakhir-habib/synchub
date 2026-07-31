@@ -23,3 +23,7 @@ Thumbs.db
 dist/
 build/
 out/
+
+# Agent optional electron
+/agent/electron/node_modules/
+/agent/electron/icon.png
