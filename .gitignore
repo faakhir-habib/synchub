@@ -1,0 +1,25 @@
+node_modules/
+*.log
+.env
+.env.*
+!.env.example
+
+# Hub runtime data
+/hub/data/
+/hub/relay-store/
+*.sqlite
+*.sqlite-*
+*.db
+
+# Agent runtime config/state
+/agent/config.json
+/agent/state/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+dist/
+build/
+out/
