@@ -4,18 +4,17 @@ A desktop tray wrapper around the agent core. It runs the same
 `runAgent()` in-process, shows a status menu with recent activity, and raises
 native Electron notifications on pulls / merges / conflicts.
 
-Electron is a large dependency, so it is **not** installed by default.
+## Run
 
-## Enable
-
-From the `agent/` directory:
+Electron is installed as a devDependency. From the `agent/` directory:
 
 ```
-npm install electron --save-dev
-npx electron electron/main.js
+npm run tray        # = electron electron/main.js
 ```
 
 Pair first if you haven't: `node src/cli.js pair <CODE> <hubUrl>`.
+(If you cloned fresh, `npm install` will pull Electron and download its binary on
+first launch.)
 
 ## Branding
 
