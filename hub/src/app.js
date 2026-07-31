@@ -26,7 +26,14 @@ export function createApp(db = openDb(), opts = {}) {
   app.locals.store = store;
   app.locals.realtime = realtime;
   app.use(express.json({ limit: "25mb" }));
-  app.use(express.static(join(__dirname, "..", "public")));
+  // Always revalidate HTML/JS/CSS so deploys are picked up immediately (no stale UI).
+  app.use(express.static(join(__dirname, "..", "public"), {
+    etag: true,
+    lastModified: true,
+    setHeaders: (res, filePath) => {
+      if (/\.(html|js|css)$/.test(filePath)) res.setHeader("Cache-Control", "no-cache");
+    },
+  }));
 
   app.get("/api/health", (_req, res) => res.json({ ok: true }));
   app.use("/api/auth", authRoutes(db));
