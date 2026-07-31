@@ -1,118 +1,124 @@
-import { Session, initShell, timeAgo, esc, renderIcons, rebind, toast } from "/js/app-shell.js";
+import { Session, initShell, timeAgo, esc, renderIcons, rebind, toast, modalForm, modalConfirm } from "/js/app-shell.js";
 
 const id = Number(new URLSearchParams(location.search).get("id"));
 await initShell({ onChanged: (m) => { if (m.projectId === id) load(); } });
 if (!id) { toast("No project id"); } else { await load(); }
 
-let project = null;
+let detail = null;
 
 async function load() {
-  const [detail, machines, conflicts] = await Promise.all([
+  const [d, machines, conflicts] = await Promise.all([
     Session.api("GET", `/api/projects/${id}`),
     Session.api("GET", "/api/machines"),
     Session.api("GET", `/api/projects/${id}/conflicts`),
   ]);
-  if (!detail) { toast("Project not found"); return; }
-  project = detail;
+  if (!d) { toast("Project not found"); return; }
+  detail = d;
 
-  document.querySelectorAll(".page-heading h1").forEach((el) => (el.textContent = detail.alias));
+  document.querySelectorAll(".page-heading h1").forEach((el) => (el.textContent = d.alias));
   const kicker = document.querySelector(".page-kicker");
-  if (kicker) kicker.textContent = `Projects / ${detail.alias}`;
+  if (kicker) kicker.textContent = `Projects / ${d.alias}`;
 
-  renderStatCards(detail, machines, conflicts);
-  renderMachines(detail, machines);
-  renderDetails(detail);
-  wireActions(detail);
+  const cards = document.querySelectorAll(".stats-grid .stat-card .stat-value");
+  if (cards[0]) cards[0].textContent = d.sync_mode[0].toUpperCase() + d.sync_mode.slice(1);
+  if (cards[1]) cards[1].textContent = d.mappings.length;
+  if (cards[2]) cards[2].textContent = "\u2014";
+  if (cards[3]) cards[3].textContent = (conflicts || []).length;
+
+  renderMachines(d, machines || []);
+  renderDetails(d);
+  wireActions(d, machines || []);
 }
 
-function renderStatCards(detail, machines, conflicts) {
-  const cards = document.querySelectorAll(".stats-grid .stat-card");
-  const mapped = detail.mappings.length;
-  const set = (card, v) => { const e = card?.querySelector(".stat-value"); if (e) e.textContent = v; };
-  if (cards[0]) set(cards[0], detail.sync_mode[0].toUpperCase() + detail.sync_mode.slice(1));
-  if (cards[1]) set(cards[1], mapped);
-  if (cards[2]) set(cards[2], "—"); // tracked files count (needs manifest; left blank)
-  if (cards[3]) set(cards[3], (conflicts || []).length);
-}
-
-function renderMachines(detail, machines) {
+function renderMachines(d, machines) {
   const table = document.querySelector(".dashboard-grid .table");
   if (!table) return;
   const header = table.querySelector(".table-header");
   table.innerHTML = "";
   if (header) table.appendChild(header);
+  const byId = new Map(machines.map((m) => [m.id, m]));
 
-  const byId = new Map((machines || []).map((m) => [m.id, m]));
-  for (const map of detail.mappings) {
+  if (!d.mappings.length) {
+    table.insertAdjacentHTML("beforeend", '<div class="empty-state">No machines mapped yet. Use “Add machine”.</div>');
+  }
+  for (const map of d.mappings) {
     const m = byId.get(map.machine_id) || {};
     const online = m.status === "online";
-    table.insertAdjacentHTML("beforeend", `
-      <div class="table-row table-machines">
-        <div class="item-title"><div class="item-icon"><svg data-icon="monitor"></svg></div>
-          <div class="item-copy"><strong>${esc(m.name || "machine " + map.machine_id)}</strong><span>${esc(map.local_path)}</span></div></div>
-        <div><span class="badge ${online ? "badge-green" : "badge-neutral"}">${online ? "Online" : "Offline"}</span></div>
-        <div class="cell-text">${esc(m.agent_version || "—")}</div>
-        <div class="cell-muted">${timeAgo(m.last_seen_at)}</div>
-        <div class="row-actions"><button class="icon-button" data-unmap="${map.machine_id}" title="Unmap"><svg data-icon="trash"></svg></button></div>
-      </div>`);
-  }
-  if (!detail.mappings.length) {
-    table.insertAdjacentHTML("beforeend",
-      '<div class="table-row"><div class="cell-muted" style="padding:14px">No machines mapped. Use “Add machine” to map one.</div></div>');
-  }
-  table.querySelectorAll("[data-unmap]").forEach((btn) =>
-    btn.addEventListener("click", async () => {
-      await Session.api("DELETE", `/api/projects/${id}/mappings/${btn.dataset.unmap}`);
+    const row = document.createElement("div");
+    row.className = "table-row table-machines";
+    row.innerHTML = `
+      <div class="item-title"><div class="item-icon"><svg data-icon="monitor"></svg></div>
+        <div class="item-copy"><strong>${esc(m.name || "machine " + map.machine_id)}</strong><span>${esc(map.local_path)}</span></div></div>
+      <div><span class="badge ${online ? "badge-green" : "badge-neutral"}">${online ? "Online" : "Offline"}</span></div>
+      <div class="cell-text">${esc(m.agent_version || "\u2014")}</div>
+      <div class="cell-muted">${timeAgo(m.last_seen_at)}</div>
+      <div class="row-actions"><button class="icon-button" title="Unmap machine"><svg data-icon="trash"></svg></button></div>`;
+    row.querySelector("button").addEventListener("click", async () => {
+      const ok = await modalConfirm({ title: `Unmap ${m.name || "machine"}?`, message: "It stops syncing this project. Re-map anytime.", confirmLabel: "Unmap", danger: true });
+      if (!ok) return;
+      await Session.api("DELETE", `/api/projects/${id}/mappings/${map.machine_id}`);
       toast("Machine unmapped"); load();
-    }));
+    });
+    table.appendChild(row);
+  }
   renderIcons(table);
 }
 
-function renderDetails(detail) {
-  const rows = document.querySelectorAll(".stack .card .status-row");
-  // Best-effort fill of the "Project details" card
-  rows.forEach((row) => {
+function renderDetails(d) {
+  document.querySelectorAll(".stack .card .status-row").forEach((row) => {
     const label = row.querySelector(".status-label")?.textContent?.toLowerCase() || "";
     const val = row.querySelector("span:last-child");
     if (!val) return;
-    if (label.includes("local path")) val.textContent = detail.mappings[0]?.local_path || "—";
-    else if (label.includes("created")) val.textContent = timeAgo(detail.created_at);
-    else if (label.includes("branch")) { row.style.display = "none"; }
-    else if (label.includes("ignore")) { row.style.display = "none"; }
+    if (label.includes("local path")) val.textContent = d.mappings[0]?.local_path || "\u2014";
+    else if (label.includes("created")) val.textContent = timeAgo(d.created_at);
+    else if (label.includes("branch") || label.includes("ignore")) row.style.display = "none";
   });
 }
 
-function wireActions(detail) {
-  // "Sync now" (first heading button)
+function wireActions(d, machines) {
+  // Sync now
   rebind(document.querySelector(".heading-actions .btn"), "click", async (e) => {
     e.preventDefault();
     const res = await Session.api("POST", `/api/projects/${id}/sync-now`);
-    toast(res?.status === "triggered" ? "Sync requested" : "Could not trigger sync");
+    toast(res?.status === "triggered" ? "Sync requested on all machines" : "Could not trigger sync");
   });
 
-  // Replace "Project settings" with a sync-mode cycler + Add machine
+  // Project settings -> modal (sync mode)
   const settingsBtn = document.querySelectorAll(".heading-actions .btn")[1];
   rebind(settingsBtn, "click", async (e) => {
     e.preventDefault();
-    const order = ["auto", "manual", "stopped"];
-    const next = order[(order.indexOf(detail.sync_mode) + 1) % order.length];
-    const res = await Session.api("PUT", `/api/projects/${id}/sync-mode`, { sync_mode: next });
-    if (res?.sync_mode) { toast(`Sync mode → ${next}`); load(); }
+    const vals = await modalForm({
+      title: "Project settings",
+      fields: [{ name: "sync_mode", label: "Sync mode", type: "select", value: d.sync_mode, options: [
+        { value: "auto", label: "Auto — sync live" },
+        { value: "manual", label: "Manual — sync on demand" },
+        { value: "stopped", label: "Stopped — no syncing" },
+      ] }],
+      submitLabel: "Save",
+    });
+    if (!vals) return;
+    const res = await Session.api("PUT", `/api/projects/${id}/sync-mode`, { sync_mode: vals.sync_mode });
+    if (res?.sync_mode) { toast(`Sync mode set to ${vals.sync_mode}`); load(); }
   });
 
-  // "Manage machines" link becomes "Add machine" mapping flow
-  const manage = document.querySelector(".dashboard-grid .btn.btn-secondary.btn-sm");
-  rebind(manage, "click", async (e) => {
+  // Add machine -> modal (pick machine + path)
+  rebind(document.querySelector(".dashboard-grid .btn.btn-secondary.btn-sm"), "click", async (e) => {
     e.preventDefault();
-    const machines = await Session.api("GET", "/api/machines");
-    if (!machines?.length) { toast("Create a machine first (Machines page)"); return; }
-    const list = machines.map((m, i) => `${i + 1}. ${m.name}`).join("\n");
-    const pick = prompt(`Map which machine?\n${list}\n\nEnter number:`);
-    const machine = machines[Number(pick) - 1];
-    if (!machine) return;
-    const path = prompt(`Local folder path on ${machine.name} (its ~/.claude/projects/<hash> dir):`);
-    if (!path) return;
-    await Session.api("PUT", `/api/projects/${id}/mappings/${machine.id}`, { local_path: path.trim() });
+    const mapped = new Set(d.mappings.map((x) => x.machine_id));
+    const available = machines.filter((m) => !mapped.has(m.id));
+    if (!machines.length) { toast("Create a machine first on the Machines page"); return; }
+    if (!available.length) { toast("All your machines are already mapped"); return; }
+    const vals = await modalForm({
+      title: "Add machine to project",
+      desc: "Map a machine to the local folder where this project's transcripts live.",
+      fields: [
+        { name: "machine_id", label: "Machine", type: "select", value: String(available[0].id), options: available.map((m) => ({ value: String(m.id), label: m.name })) },
+        { name: "local_path", label: "Local folder path", placeholder: "C:\\Users\\you\\.claude\\projects\\<hash>", required: true },
+      ],
+      submitLabel: "Add",
+    });
+    if (!vals) return;
+    await Session.api("PUT", `/api/projects/${id}/mappings/${vals.machine_id}`, { local_path: vals.local_path });
     toast("Machine mapped"); load();
   });
 }

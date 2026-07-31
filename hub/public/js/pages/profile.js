@@ -28,6 +28,20 @@ if (me) {
     else toast("Could not save");
   });
 
+  // Fill real Workspace-access counts (Role / Projects / Machines).
+  const [projects, machines] = await Promise.all([
+    Session.api("GET", "/api/projects"),
+    Session.api("GET", "/api/machines"),
+  ]);
+  document.querySelectorAll(".stack .card .status-row").forEach((row) => {
+    const label = row.querySelector(".status-label")?.textContent?.toLowerCase() || "";
+    const val = row.querySelector("span:last-child");
+    if (!val) return;
+    if (label.includes("role")) val.textContent = "Owner";
+    else if (label.includes("project")) val.textContent = (projects || []).length;
+    else if (label.includes("machine")) val.textContent = (machines || []).length;
+  });
+
   // Add a Log out button.
   const actions = document.querySelector(".heading-actions");
   if (actions && !actions.querySelector("[data-logout]")) {

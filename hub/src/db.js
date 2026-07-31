@@ -16,7 +16,11 @@ export function openDb(path = process.env.DB_PATH || join(__dirname, "..", "data
   const schema = readFileSync(join(__dirname, "schema.sql"), "utf8");
   db.exec(schema);
   // Lightweight migrations (idempotent — ignore "duplicate column" on re-run).
-  for (const mig of ["ALTER TABLE users ADD COLUMN name TEXT"]) {
+  for (const mig of [
+    "ALTER TABLE users ADD COLUMN name TEXT",
+    "ALTER TABLE users ADD COLUMN notify_conflicts INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE users ADD COLUMN notify_sync INTEGER NOT NULL DEFAULT 1",
+  ]) {
     try { db.exec(mig); } catch { /* already applied */ }
   }
   return db;

@@ -62,6 +62,60 @@ export function showModal(innerHtml) {
   return { overlay, box, close: () => overlay.remove() };
 }
 
+// A modal with form fields. Resolves to a values object on submit, or null on cancel.
+// fields: [{ name, label, type ('text'|'select'), placeholder, value, required, options:[{value,label}] }]
+export function modalForm({ title, desc = "", fields = [], submitLabel = "Save" }) {
+  return new Promise((resolve) => {
+    const body = fields.map((f) => {
+      const id = `mf-${f.name}`;
+      let control;
+      if (f.type === "select") {
+        control = `<select id="${id}">${(f.options || []).map((o) =>
+          `<option value="${esc(o.value)}"${o.value === f.value ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select>`;
+      } else {
+        control = `<input id="${id}" type="${f.type || "text"}" placeholder="${esc(f.placeholder || "")}" value="${esc(f.value || "")}">`;
+      }
+      return `<div class="form-group"><label for="${id}">${esc(f.label)}</label>${control}</div>`;
+    }).join("");
+    const { box, close } = showModal(`
+      <h3 class="modal-title">${esc(title)}</h3>${desc ? `<p class="modal-desc">${esc(desc)}</p>` : ""}
+      <div class="modal-form">${body}
+        <div class="modal-actions">
+          <button class="btn btn-secondary" data-cancel>Cancel</button>
+          <button class="btn" data-submit>${esc(submitLabel)}</button>
+        </div>
+      </div>`);
+    const done = (val) => { close(); resolve(val); };
+    box.querySelector("[data-cancel]").addEventListener("click", () => done(null));
+    const submit = () => {
+      const out = {};
+      for (const f of fields) {
+        const el = box.querySelector(`#mf-${f.name}`);
+        out[f.name] = el ? el.value.trim() : "";
+        if (f.required && !out[f.name]) { el?.focus(); return; }
+      }
+      done(out);
+    };
+    box.querySelector("[data-submit]").addEventListener("click", submit);
+    box.querySelector("input,select")?.focus();
+    box.querySelectorAll("input").forEach((i) => i.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); }));
+  });
+}
+
+// A styled confirm dialog. Resolves true/false.
+export function modalConfirm({ title, message = "", confirmLabel = "Confirm", danger = false }) {
+  return new Promise((resolve) => {
+    const { box, close } = showModal(`
+      <h3 class="modal-title">${esc(title)}</h3>${message ? `<p class="modal-desc">${esc(message)}</p>` : ""}
+      <div class="modal-actions">
+        <button class="btn btn-secondary" data-cancel>Cancel</button>
+        <button class="btn ${danger ? "btn-danger" : ""}" data-ok>${esc(confirmLabel)}</button>
+      </div>`);
+    box.querySelector("[data-cancel]").addEventListener("click", () => { close(); resolve(false); });
+    box.querySelector("[data-ok]").addEventListener("click", () => { close(); resolve(true); });
+  });
+}
+
 let wsUser = null;
 
 export async function initShell({ onNotification, onChanged } = {}) {
@@ -83,8 +137,8 @@ export async function refreshNavCounts() {
     ]);
     setNavCount("conflicts.html", conf?.length || 0);
     setNavCount("notifications.html", notes?.unread || 0);
-    const dot = document.querySelector(".notification-dot");
-    if (dot) dot.style.display = (notes?.unread || 0) > 0 ? "" : "none";
+    const unread = notes?.unread || 0;
+    document.querySelectorAll(".notification-dot").forEach((dot) => dot.classList.toggle("show", unread > 0));
   } catch {}
 }
 

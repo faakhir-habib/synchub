@@ -1,7 +1,14 @@
-import { Session, initShell, timeAgo, fmtBytes, esc, renderIcons } from "/js/app-shell.js";
+import { Session, initShell, timeAgo, fmtBytes, esc, renderIcons, rebind, toast } from "/js/app-shell.js";
 
 const me = await initShell({ onNotification: load, onChanged: load });
 if (me) await load();
+
+// Refresh button -> reload live data
+rebind(document.querySelector(".heading-actions .btn.btn-secondary"), "click", async (e) => {
+  e.preventDefault();
+  await load();
+  toast("Refreshed");
+});
 
 async function load() {
   const [metrics, activity, projects] = await Promise.all([
@@ -52,7 +59,7 @@ function renderRecentProjects(projects) {
   if (header) table.appendChild(header);
   if (!projects.length) {
     table.insertAdjacentHTML("beforeend",
-      '<div class="table-row"><div class="cell-muted" style="padding:14px">No projects yet — create one on the Projects page.</div></div>');
+      '<div class="empty-state">No projects yet — create one on the Projects page.</div>');
     return;
   }
   for (const p of projects.slice(0, 5)) {
