@@ -1,8 +1,12 @@
 import { createApp } from "../src/app.js";
 import { openDb } from "../src/db.js";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 export function testApp() {
-  return createApp(openDb(":memory:"));
+  const relayDir = mkdtempSync(join(tmpdir(), "synchub-relay-"));
+  return createApp(openDb(":memory:"), { relayDir });
 }
 
 // Starts the app on an ephemeral port. Returns { url, close }.
