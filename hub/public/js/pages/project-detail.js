@@ -83,22 +83,27 @@ function wireActions(d, machines) {
     toast(res?.status === "triggered" ? "Sync requested on all machines" : "Could not trigger sync");
   });
 
-  // Project settings -> modal (sync mode)
+  // Project settings -> modal (rename + sync mode)
   const settingsBtn = document.querySelectorAll(".heading-actions .btn")[1];
   rebind(settingsBtn, "click", async (e) => {
     e.preventDefault();
     const vals = await modalForm({
       title: "Project settings",
-      fields: [{ name: "sync_mode", label: "Sync mode", type: "select", value: d.sync_mode, options: [
-        { value: "auto", label: "Auto — sync live" },
-        { value: "manual", label: "Manual — sync on demand" },
-        { value: "stopped", label: "Stopped — no syncing" },
-      ] }],
+      desc: "Rename the project or change how it syncs.",
+      fields: [
+        { name: "alias", label: "Project name", value: d.alias, required: true },
+        { name: "sync_mode", label: "Sync mode", type: "select", value: d.sync_mode, options: [
+          { value: "auto", label: "Auto — sync live" },
+          { value: "manual", label: "Manual — sync on demand" },
+          { value: "stopped", label: "Stopped — no syncing" },
+        ] },
+      ],
       submitLabel: "Save",
     });
     if (!vals) return;
-    const res = await Session.api("PUT", `/api/projects/${id}/sync-mode`, { sync_mode: vals.sync_mode });
-    if (res?.sync_mode) { toast(`Sync mode set to ${vals.sync_mode}`); load(); }
+    const res = await Session.api("PUT", `/api/projects/${id}`, { alias: vals.alias, sync_mode: vals.sync_mode });
+    if (res?.id) { toast("Project settings saved"); load(); }
+    else toast(res?.error || "Could not save");
   });
 
   // Add machine -> modal (pick machine + path)

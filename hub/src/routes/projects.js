@@ -90,6 +90,22 @@ export function projectRoutes(db, store, realtime = null) {
     res.json({ ...p, mappings: mappings.listForProject(db, p.id) });
   });
 
+  // Update project settings (rename alias and/or change sync mode).
+  r.put("/:id", requireUser(db), (req, res) => {
+    const { alias, sync_mode } = req.body || {};
+    if (alias !== undefined && !String(alias).trim()) return res.status(400).json({ error: "alias cannot be empty" });
+    try {
+      const p = projects.update(db, req.user.id, Number(req.params.id), {
+        ...(alias !== undefined ? { alias: String(alias).trim() } : {}),
+        ...(sync_mode !== undefined ? { sync_mode } : {}),
+      });
+      if (!p) return res.status(400).json({ error: "invalid project or sync_mode" });
+      res.json(p);
+    } catch {
+      res.status(409).json({ error: "alias already exists" });
+    }
+  });
+
   r.put("/:id/sync-mode", requireUser(db), (req, res) => {
     const p = projects.setSyncMode(db, req.user.id, Number(req.params.id), req.body?.sync_mode);
     if (!p) return res.status(400).json({ error: "invalid project or sync_mode" });

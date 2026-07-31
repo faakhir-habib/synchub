@@ -30,6 +30,20 @@ test("project create/list/sync-mode/delete, scoped to owner", async () => {
   }
 });
 
+test("PUT /:id renames project + changes sync mode", async () => {
+  const srv = await startTestServer();
+  try {
+    const token = await signup(srv.url, "ren@x.com");
+    const id = (await api(srv.url, "POST", "/api/projects", { token, body: { alias: "old" } })).body.id;
+    const res = await api(srv.url, "PUT", `/api/projects/${id}`, { token, body: { alias: "new-name", sync_mode: "manual" } });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.alias, "new-name");
+    assert.equal(res.body.sync_mode, "manual");
+  } finally {
+    await srv.close();
+  }
+});
+
 test("duplicate alias for same user is 409", async () => {
   const srv = await startTestServer();
   try {
