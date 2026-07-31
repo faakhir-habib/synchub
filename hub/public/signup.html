@@ -5,12 +5,13 @@ if (Session.token) location.href = "/dashboard.html";
 const form = document.querySelector("form.auth-form");
 form?.addEventListener("submit", async (e) => {
   e.preventDefault();
+  const name = form.querySelector('.form-group input').value.trim();
   const email = form.querySelector('input[type=email]').value.trim();
   const password = form.querySelector('input[type=password]').value;
   if (password.length < 6) { alert("Password must be at least 6 characters."); return; }
   const res = await fetch("/api/auth/signup", {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ name, email, password }),
   });
   if (res.status === 201) { Session.token = (await res.json()).token; location.href = "/dashboard.html"; }
   else { alert((await res.json().catch(() => ({}))).error || "Signup failed."); }
