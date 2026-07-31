@@ -7,7 +7,7 @@ import * as mappings from "../models/mappings.js";
 import * as fileState from "../models/fileState.js";
 import * as events from "../models/events.js";
 import * as conflicts from "../models/conflicts.js";
-import * as notifications from "../models/notifications.js";
+import { notifyUser } from "../lib/notify.js";
 
 // Agent-facing sync endpoints. Auth via X-Machine-Token (req.machine).
 // `store` is a relay store instance (see lib/relayStore.js).
@@ -15,7 +15,6 @@ export function agentRoutes(db, store, realtime = null) {
   const r = Router();
   const fanOut = (projectId, filename, hash, excludeMachineId) =>
     realtime?.notifyProjectChanged(projectId, { filename, hash, excludeMachineId });
-  const notify = (userId, note) => realtime?.pushNotification(userId, note);
 
   function touch(machine) {
     db.prepare("UPDATE machines SET last_seen_at = datetime('now'), status = 'online' WHERE id = ?")
@@ -56,6 +55,7 @@ export function agentRoutes(db, store, realtime = null) {
   // base_hash is the canonical hash the agent last knew (null if never synced).
   r.post("/push/:projectId", requireMachine(db), (req, res) => {
     if (!requireMapping(req)) return res.status(404).json({ error: "not mapped to project" });
+    const started = Date.now();
     const projectId = Number(req.params.projectId);
     const { filename, content, base_hash = null } = req.body || {};
     if (!isSafeFilename(filename)) return res.status(400).json({ error: "invalid filename" });
@@ -92,16 +92,16 @@ export function agentRoutes(db, store, realtime = null) {
         events.record(db, {
           user_id: userId, machine_id: req.machine.id, project_id: projectId,
           type: m.kind === "merged" ? "auto_merge" : "push", filename, bytes: finalSize,
+          latency_ms: Date.now() - started,
         });
         if (m.kind === "merged") {
           const c = conflicts.open(db, projectId, filename, req.machine.id, finalHash);
           conflicts.resolve(db, c.id);
           db.prepare("UPDATE conflicts SET auto_merged = 1 WHERE id = ?").run(c.id);
-          const note = notifications.record(db, {
+          notifyUser(db, realtime, {
             user_id: userId, type: "sync", title: `Auto-merged ${filename}`,
             body: `Diverging edits to ${filename} were merged automatically.`,
           });
-          notify(userId, note);
         }
         fanOut(projectId, filename, finalHash, req.machine.id);
         touch(req.machine);
@@ -112,11 +112,10 @@ export function agentRoutes(db, store, realtime = null) {
       const candidateName = conflicts.candidateFilename(filename, newHash);
       store.write(userId, projectId, candidateName, content);
       const c = conflicts.open(db, projectId, filename, req.machine.id, newHash);
-      const note = notifications.record(db, {
+      notifyUser(db, realtime, {
         user_id: userId, type: "conflict", title: `Conflict in ${filename}`,
         body: `${filename} diverged and needs manual resolution.`,
       });
-      notify(userId, note);
       events.record(db, {
         user_id: userId, machine_id: req.machine.id, project_id: projectId,
         type: "conflict", filename, bytes: Buffer.byteLength(content, "utf8"),
@@ -136,6 +135,7 @@ export function agentRoutes(db, store, realtime = null) {
       type: "push",
       filename,
       bytes: size,
+      latency_ms: Date.now() - started,
     });
     fanOut(projectId, filename, newHash, req.machine.id);
     touch(req.machine);

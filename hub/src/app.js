@@ -9,6 +9,8 @@ import { machineRoutes, pairRedeemRoutes } from "./routes/machines.js";
 import { projectRoutes } from "./routes/projects.js";
 import { agentRoutes } from "./routes/agent.js";
 import { conflictRoutes } from "./routes/conflicts.js";
+import { dashboardRoutes } from "./routes/dashboard.js";
+import { notificationRoutes } from "./routes/notifications.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -33,6 +35,8 @@ export function createApp(db = openDb(), opts = {}) {
   app.use("/api/agent", agentRoutes(db, store, realtime));
   app.use("/api/projects", projectRoutes(db, store, realtime));
   app.use("/api/conflicts", conflictRoutes(db));
+  app.use("/api/dashboard", dashboardRoutes(db));
+  app.use("/api/notifications", notificationRoutes(db));
 
   app.get("/", (_req, res) => res.redirect("/login.html"));
   return app;
