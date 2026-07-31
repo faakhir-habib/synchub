@@ -85,7 +85,7 @@ async function load() {
   const cards = document.querySelectorAll(".stats-grid .stat-card .stat-value");
   if (cards[0]) cards[0].textContent = d.sync_mode[0].toUpperCase() + d.sync_mode.slice(1);
   if (cards[1]) cards[1].textContent = d.mappings.length;
-  if (cards[2]) cards[2].textContent = "\u2014";
+  if (cards[2]) cards[2].textContent = d.tracked_files ?? 0;
   if (cards[3]) cards[3].textContent = (conflicts || []).length;
 
   renderMachines(d, machines || []);
@@ -114,8 +114,22 @@ function renderMachines(d, machines) {
       <div><span class="badge ${online ? "badge-green" : "badge-neutral"}">${online ? "Online" : "Offline"}</span></div>
       <div class="cell-text">${esc(m.agent_version || "\u2014")}</div>
       <div class="cell-muted">${timeAgo(m.last_seen_at)}</div>
-      <div class="row-actions"><button class="icon-button" title="Unmap machine"><svg data-icon="trash"></svg></button></div>`;
-    row.querySelector("button").addEventListener("click", async () => {
+      <div class="row-actions" style="display:flex;gap:6px">
+        <button class="icon-button" data-edit title="Change folder path"><svg data-icon="settings"></svg></button>
+        <button class="icon-button" data-unmap title="Unmap machine"><svg data-icon="trash"></svg></button>
+      </div>`;
+    row.querySelector("[data-edit]").addEventListener("click", async () => {
+      const vals = await modalForm({
+        title: `Folder path — ${m.name || "machine"}`,
+        desc: "The local ~/.claude/projects/<hash> folder on this machine (where the .jsonl transcripts live).",
+        fields: [{ name: "local_path", label: "Local folder path", value: map.local_path, required: true }],
+        submitLabel: "Save path",
+      });
+      if (!vals) return;
+      await Session.api("PUT", `/api/projects/${id}/mappings/${map.machine_id}`, { local_path: vals.local_path });
+      toast("Folder path updated"); load();
+    });
+    row.querySelector("[data-unmap]").addEventListener("click", async () => {
       await Session.api("DELETE", `/api/projects/${id}/mappings/${map.machine_id}`);
       toast("Machine unmapped"); load();
     });

@@ -87,7 +87,11 @@ export function projectRoutes(db, store, realtime = null) {
   r.get("/:id", requireUser(db), (req, res) => {
     const p = projects.findOwned(db, req.user.id, Number(req.params.id));
     if (!p) return res.status(404).json({ error: "not found" });
-    res.json({ ...p, mappings: mappings.listForProject(db, p.id) });
+    res.json({
+      ...p,
+      mappings: mappings.listForProject(db, p.id),
+      tracked_files: fileState.listForProject(db, p.id).length,
+    });
   });
 
   // Update project settings (rename alias and/or change sync mode).
