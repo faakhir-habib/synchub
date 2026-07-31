@@ -1,0 +1,19 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><title>Create account · SyncHub</title><link rel="stylesheet" href="assets/css/theme.css"></head><body><main class="auth-page"><section class="auth-visual"><a class="auth-brand" href="dashboard.html"><div class="brand-mark"></div><strong>SyncHub</strong></a><div class="auth-message"><div class="eyebrow">One workspace. Every machine.</div><h1>Keep development in perfect sync.</h1><p>Move between machines without losing context. SyncHub keeps project files aligned, surfaces conflicts instantly, and gives you one clear view of every workspace.</p><div class="auth-mini-card"><div class="auth-project-row"><div class="auth-project"><div class="item-icon"><svg data-icon="folder"></svg></div><div><strong>my-app</strong><span>3 machines · synced 24 seconds ago</span></div></div><span class="badge badge-green">Synced</span></div><div class="auth-project-row"><div class="auth-project"><div class="item-icon"><svg data-icon="folder"></svg></div><div><strong>checkout-service</strong><span>2 machines · synced 3 minutes ago</span></div></div><span class="badge badge-green">Synced</span></div></div></div><div class="auth-footer">Encrypted in transit · Private by default · Built for developer workflows</div></section><section class="auth-panel"><div class="auth-box"><h2>Create your account</h2><p>Start syncing projects between your machines in a few minutes.</p><form class="auth-form" action="dashboard.html"><div class="form-group"><label>Full name</label><input placeholder="Your name" required></div><div class="form-group"><label>Email address</label><input type="email" placeholder="you@company.com" required></div><div class="form-group"><label>Password</label><div class="password-wrap"><input id="signup-password" type="password" placeholder="At least 8 characters" required><button type="button" class="password-toggle" data-password-toggle="signup-password"><svg data-icon="eye"></svg></button></div></div><label class="checkline"><input type="checkbox" required> I agree to the Terms and Privacy Policy</label><button class="btn btn-block" type="submit">Create account <svg data-icon="arrow"></svg></button></form><div class="auth-switch">Already have an account? <a class="text-link" href="login.html">Sign in</a></div></div></section></main><script src="assets/js/app.js"></script>
+<script type="module">
+import { Session } from "/js/session.js";
+if (Session.token) location.href = "/dashboard.html";
+const form = document.querySelector("form.auth-form");
+form?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const email = form.querySelector('input[type=email]').value.trim();
+  const password = form.querySelector('input[type=password]').value;
+  if (password.length < 6) { alert("Password must be at least 6 characters."); return; }
+  const res = await fetch("/api/auth/signup", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (res.status === 201) { Session.token = (await res.json()).token; location.href = "/dashboard.html"; }
+  else { alert((await res.json().catch(() => ({}))).error || "Signup failed."); }
+});
+</script>
+</body></html>

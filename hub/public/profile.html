@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Profile · SyncHub</title>
+  <link rel="stylesheet" href="assets/css/theme.css">
+</head>
+<body>
+<div class="app-shell">
+<aside class="sidebar">
+  <a class="brand" href="dashboard.html">
+    <div class="brand-mark"></div>
+    <div class="brand-copy"><strong>SyncHub</strong><span>Workspace sync</span></div>
+  </a>
+  <div class="nav-label">Workspace</div>
+  <nav class="nav">
+    <a class="nav-link" href="dashboard.html"><svg data-icon="dashboard"></svg><span>Dashboard</span></a>
+    <a class="nav-link" href="projects.html"><svg data-icon="folder"></svg><span>Projects</span></a>
+    <a class="nav-link" href="machines.html"><svg data-icon="monitor"></svg><span>Machines</span></a>
+    <a class="nav-link" href="conflicts.html"><svg data-icon="alert"></svg><span>Conflicts</span><span class="nav-count">2</span></a>
+  </nav>
+  <div class="nav-label">Account</div>
+  <nav class="nav">
+    <a class="nav-link" href="notifications.html"><svg data-icon="bell"></svg><span>Notifications</span><span class="nav-count">3</span></a>
+    <a class="nav-link" href="settings.html"><svg data-icon="settings"></svg><span>Settings</span></a>
+  </nav>
+  <div class="sidebar-bottom">
+    <div class="sidebar-status">
+      <div class="status-row"><span class="status-label">Sync service</span><span class="live-dot">Operational</span></div>
+      <div class="status-row"><span class="status-label">Last heartbeat</span><span>4s ago</span></div>
+    </div>
+    <a class="nav-link" href="profile.html"><div class="avatar">IN</div><span>Idrees Nazir</span><svg data-icon="chevron" style="margin-left:auto"></svg></a>
+  </div>
+</aside>
+<main class="main">
+<header class="topbar">
+  <div class="topbar-left">
+    <button class="mobile-menu" aria-label="Open navigation"><svg data-icon="menu"></svg></button>
+    <div><div class="page-kicker">Account</div><div class="page-title">Profile</div></div>
+  </div>
+  <div class="topbar-actions">
+    <a class="icon-button" href="notifications.html" aria-label="Notifications"><svg data-icon="bell"></svg><span class="notification-dot"></span></a>
+    <a class="user-chip" href="profile.html"><div class="avatar">IN</div><div class="user-meta"><strong>Idrees Nazir</strong><span>Workspace admin</span></div></a>
+  </div>
+</header><section class="content"><div class="page-heading"><div><h1>Profile</h1><p>Manage your identity and personal workspace preferences.</p></div><div class="heading-actions"><button class="btn" data-toast="Profile changes saved"><svg data-icon="check"></svg>Save changes</button></div></div>
+<div class="card">
+  <div class="profile-cover"></div>
+  <div class="profile-header"><div class="profile-identity"><div class="profile-avatar">IN</div><div class="profile-name"><h2>Idrees Nazir</h2><p>Workspace administrator · Joined June 2026</p></div></div><button class="btn btn-secondary btn-sm">Change avatar</button></div>
+</div>
+<div class="dashboard-grid">
+  <div class="card"><div class="card-head"><div><h2>Personal information</h2><p>Used across your SyncHub workspace</p></div></div><div class="card-body"><div class="form-grid"><div class="form-group"><label>Full name</label><input value="Idrees Nazir"></div><div class="form-group"><label>Display name</label><input value="Idrees"></div><div class="form-group"><label>Email address</label><input value="user@example.com"></div><div class="form-group"><label>Role</label><input value="Workspace administrator" disabled></div><div class="form-group full"><label>Bio</label><textarea placeholder="Tell your team a little about yourself">Building and maintaining synchronized development environments.</textarea></div></div></div></div>
+  <div class="stack"><div class="card"><div class="card-head"><div><h3>Workspace access</h3></div></div><div class="card-body"><div class="status-row"><span class="status-label">Role</span><span>Administrator</span></div><div class="status-row"><span class="status-label">Projects</span><span>12 accessible</span></div><div class="status-row"><span class="status-label">Machines</span><span>5 managed</span></div></div></div><div class="card"><div class="card-head"><div><h3>Account security</h3></div></div><div class="card-body"><p class="form-note">Your account is protected with email verification. Add a second factor for stronger security.</p><button class="btn btn-secondary btn-sm" style="margin-top:12px"><svg data-icon="shield"></svg>Enable 2FA</button></div></div></div>
+</div>
+</section></main></div>
+<script src="assets/js/app.js"></script>
+</body>
+</html>
