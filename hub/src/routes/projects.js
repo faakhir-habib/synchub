@@ -87,10 +87,13 @@ export function projectRoutes(db, store, realtime = null) {
   r.get("/:id", requireUser(db), (req, res) => {
     const p = projects.findOwned(db, req.user.id, Number(req.params.id));
     if (!p) return res.status(404).json({ error: "not found" });
+    const lastSync = db.prepare("SELECT MAX(updated_at) t FROM file_state WHERE project_id = ?").get(p.id).t;
     res.json({
       ...p,
       mappings: mappings.listForProject(db, p.id),
       tracked_files: fileState.listForProject(db, p.id).length,
+      last_sync_at: lastSync,
+      activity: events.recentForProject(db, p.id, 10),
     });
   });
 

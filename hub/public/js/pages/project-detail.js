@@ -10,9 +10,11 @@ const MODES = [
   { value: "stopped", label: "Stopped — no syncing" },
 ];
 
+const ACT_ICON = { push: "cloud", auto_merge: "check", conflict: "alert", conflict_resolved: "check", sync_now: "refresh" };
+
 // Wire action buttons ONCE, independent of data load, fetching fresh data on click.
 wireButtons();
-if (id) await load();
+if (id) { await load(); setInterval(load, 10000); } // live-ish refresh
 
 function wireButtons() {
   // Sync now
@@ -90,6 +92,39 @@ async function load() {
 
   renderMachines(d, machines || []);
   renderDetails(d);
+  renderSyncProgress(d);
+  renderActivity(d);
+}
+
+function renderSyncProgress(d) {
+  const card = [...document.querySelectorAll(".dashboard-grid .card")]
+    .find((c) => c.querySelector("h2")?.textContent?.includes("Sync progress"));
+  if (!card) return;
+  const n = d.tracked_files || 0;
+  const rows = card.querySelectorAll(".status-row");
+  const cycleStrong = rows[0]?.querySelector("strong");
+  if (cycleStrong) cycleStrong.textContent = `${n} / ${n} files`;
+  const bar = card.querySelector(".progress");
+  if (bar) bar.style.setProperty("--progress", n ? "100%" : "0%");
+  const completed = rows[1]?.querySelector("span:last-child");
+  if (completed) completed.textContent = d.last_sync_at ? timeAgo(d.last_sync_at) : "—";
+}
+
+function renderActivity(d) {
+  const box = document.querySelector(".project-activity");
+  if (!box) return;
+  const ev = d.activity || [];
+  box.innerHTML = "";
+  if (!ev.length) { box.innerHTML = '<div class="empty-state">No activity yet.</div>'; return; }
+  for (const e of ev) {
+    box.insertAdjacentHTML("beforeend", `
+      <div class="activity-item">
+        <div class="activity-icon"><svg data-icon="${ACT_ICON[e.type] || "zap"}"></svg></div>
+        <div class="activity-copy"><strong>${esc(e.type.replace(/_/g, " "))}</strong><p>${esc(e.filename || "")}</p></div>
+        <span class="activity-time">${timeAgo(e.created_at)}</span>
+      </div>`);
+  }
+  renderIcons(box);
 }
 
 function renderMachines(d, machines) {
