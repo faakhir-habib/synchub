@@ -17,3 +17,14 @@ export function setWebhook(db, id, url) {
   db.prepare("UPDATE users SET notify_webhook_url = ? WHERE id = ?").run(url, id);
   return findById(db, id);
 }
+
+// Update only the provided profile fields (name and/or webhook).
+export function updateProfile(db, id, fields) {
+  if (fields.name !== undefined) {
+    db.prepare("UPDATE users SET name = ? WHERE id = ?").run(fields.name, id);
+  }
+  if (fields.notify_webhook_url !== undefined) {
+    db.prepare("UPDATE users SET notify_webhook_url = ? WHERE id = ?").run(fields.notify_webhook_url, id);
+  }
+  return findById(db, id);
+}

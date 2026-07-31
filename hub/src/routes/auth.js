@@ -37,7 +37,16 @@ export function authRoutes(db) {
   });
 
   r.get("/me", requireUser(db), (req, res) => {
-    res.json({ id: req.user.id, email: req.user.email, notify_webhook_url: req.user.notify_webhook_url });
+    res.json({ id: req.user.id, email: req.user.email, name: req.user.name ?? null, notify_webhook_url: req.user.notify_webhook_url });
+  });
+
+  // Update profile — accepts any of { name, notify_webhook_url }.
+  r.put("/me", requireUser(db), (req, res) => {
+    const fields = {};
+    if ("name" in (req.body || {})) fields.name = (req.body.name ?? "").toString().slice(0, 120) || null;
+    if ("notify_webhook_url" in (req.body || {})) fields.notify_webhook_url = req.body.notify_webhook_url || null;
+    const u = users.updateProfile(db, req.user.id, fields);
+    res.json({ id: u.id, email: u.email, name: u.name ?? null, notify_webhook_url: u.notify_webhook_url });
   });
 
   r.put("/me/notify-webhook", requireUser(db), (req, res) => {

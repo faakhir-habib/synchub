@@ -31,6 +31,23 @@ test("signup then me returns the user; bad login rejected", async () => {
   }
 });
 
+test("PUT /me updates name; GET /me returns it", async () => {
+  const srv = await startTestServer();
+  try {
+    const token = (await api(srv.url, "POST", "/api/auth/signup", { body: { email: "n@n.com", password: "pw123456" } })).body.token;
+    let me = await api(srv.url, "GET", "/api/auth/me", { token });
+    assert.equal(me.body.name, null);
+    const upd = await api(srv.url, "PUT", "/api/auth/me", { token, body: { name: "Faakhir Habib", notify_webhook_url: "https://x/y" } });
+    assert.equal(upd.status, 200);
+    assert.equal(upd.body.name, "Faakhir Habib");
+    me = await api(srv.url, "GET", "/api/auth/me", { token });
+    assert.equal(me.body.name, "Faakhir Habib");
+    assert.equal(me.body.notify_webhook_url, "https://x/y");
+  } finally {
+    await srv.close();
+  }
+});
+
 test("me without token is 401; duplicate signup is 409", async () => {
   const srv = await startTestServer();
   try {
