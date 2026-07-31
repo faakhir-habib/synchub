@@ -1,0 +1,19 @@
+import { DatabaseSync } from "node:sqlite";
+import { readFileSync, mkdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Pass ":memory:" in tests, or a file path in production.
+// Uses Node's built-in node:sqlite (DatabaseSync) — no native build step.
+export function openDb(path = process.env.DB_PATH || join(__dirname, "..", "data", "synchub.sqlite")) {
+  if (path !== ":memory:") {
+    mkdirSync(dirname(path), { recursive: true });
+  }
+  const db = new DatabaseSync(path);
+  db.exec("PRAGMA foreign_keys = ON");
+  const schema = readFileSync(join(__dirname, "schema.sql"), "utf8");
+  db.exec(schema);
+  return db;
+}
