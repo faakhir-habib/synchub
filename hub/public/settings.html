@@ -19,19 +19,19 @@
     <a class="nav-link" href="dashboard.html"><svg data-icon="dashboard"></svg><span>Dashboard</span></a>
     <a class="nav-link" href="projects.html"><svg data-icon="folder"></svg><span>Projects</span></a>
     <a class="nav-link" href="machines.html"><svg data-icon="monitor"></svg><span>Machines</span></a>
-    <a class="nav-link" href="conflicts.html"><svg data-icon="alert"></svg><span>Conflicts</span><span class="nav-count">2</span></a>
+    <a class="nav-link" href="conflicts.html"><svg data-icon="alert"></svg><span>Conflicts</span></a>
   </nav>
   <div class="nav-label">Account</div>
   <nav class="nav">
-    <a class="nav-link" href="notifications.html"><svg data-icon="bell"></svg><span>Notifications</span><span class="nav-count">3</span></a>
+    <a class="nav-link" href="notifications.html"><svg data-icon="bell"></svg><span>Notifications</span></a>
     <a class="nav-link" href="settings.html"><svg data-icon="settings"></svg><span>Settings</span></a>
   </nav>
   <div class="sidebar-bottom">
     <div class="sidebar-status">
       <div class="status-row"><span class="status-label">Sync service</span><span class="live-dot">Operational</span></div>
-      <div class="status-row"><span class="status-label">Last heartbeat</span><span>4s ago</span></div>
+      <div class="status-row"><span class="status-label">Last heartbeat</span><span>—</span></div>
     </div>
-    <a class="nav-link" href="profile.html"><div class="avatar">IN</div><span>Idrees Nazir</span><svg data-icon="chevron" style="margin-left:auto"></svg></a>
+    <a class="nav-link" href="profile.html"><div class="avatar"></div><span></span><svg data-icon="chevron" style="margin-left:auto"></svg></a>
   </div>
 </aside>
 <main class="main">
@@ -42,15 +42,15 @@
   </div>
   <div class="topbar-actions">
     <a class="icon-button" href="notifications.html" aria-label="Notifications"><svg data-icon="bell"></svg><span class="notification-dot"></span></a>
-    <a class="user-chip" href="profile.html"><div class="avatar">IN</div><div class="user-meta"><strong>Idrees Nazir</strong><span>Workspace admin</span></div></a>
+    <a class="user-chip" href="profile.html"><div class="avatar"></div><div class="user-meta"><strong></strong><span></span></div></a>
   </div>
 </header><section class="content"><div class="page-heading"><div><h1>Settings</h1><p>Configure workspace behavior, notifications, integrations, and security defaults.</p></div><div class="heading-actions"><button class="btn" data-toast="Settings saved"><svg data-icon="check"></svg>Save changes</button></div></div>
 <div class="settings-layout">
   <div class="card settings-nav"><a class="settings-link active" href="#general"><svg data-icon="settings"></svg>General</a><a class="settings-link" href="#notifications"><svg data-icon="bell"></svg>Notifications</a><a class="settings-link" href="#integrations"><svg data-icon="webhook"></svg>Integrations</a><a class="settings-link" href="#security"><svg data-icon="shield"></svg>Security</a></div>
   <div class="stack">
-    <div class="card" id="general"><div class="card-head"><div><h2>General</h2><p>Workspace profile and sync defaults</p></div></div><div class="card-body"><div class="form-grid"><div class="form-group"><label>Workspace name</label><input value="Idrees Workspace"></div><div class="form-group"><label>Account email</label><input value="user@example.com"></div><div class="form-group"><label>Default sync mode</label><select><option>Automatic</option><option>Manual</option></select></div><div class="form-group"><label>Conflict strategy</label><select><option>Ask before resolving</option><option>Prefer newest</option></select></div></div></div></div>
+    <div class="card" id="general"><div class="card-head"><div><h2>General</h2><p>Workspace profile and sync defaults</p></div></div><div class="card-body"><div class="form-grid"><div class="form-group"><label>Workspace name</label><input value=""></div><div class="form-group"><label>Account email</label><input value=""></div><div class="form-group"><label>Default sync mode</label><select><option>Automatic</option><option>Manual</option></select></div><div class="form-group"><label>Conflict strategy</label><select><option>Ask before resolving</option><option>Prefer newest</option></select></div></div></div></div>
     <div class="card" id="notifications"><div class="card-head"><div><h2>Notifications</h2><p>Choose which events should get your attention</p></div></div><div class="card-body"><div class="setting-row"><div class="setting-copy"><strong>Conflict alerts</strong><p>Notify me when two machines create conflicting file versions.</p></div><button class="toggle on" aria-label="Toggle conflict alerts"></button></div><div class="setting-row"><div class="setting-copy"><strong>Machine offline alerts</strong><p>Alert me when an active machine has not checked in for 30 minutes.</p></div><button class="toggle on" aria-label="Toggle machine alerts"></button></div><div class="setting-row"><div class="setting-copy"><strong>Successful sync summaries</strong><p>Send low-priority notifications after large synchronization cycles.</p></div><button class="toggle" aria-label="Toggle sync summaries"></button></div></div></div>
-    <div class="card" id="integrations"><div class="card-head"><div><h2>Webhook</h2><p>Forward SyncHub events to another service</p></div></div><div class="card-body"><div class="form-group"><label>Webhook URL</label><div style="display:flex;gap:8px"><input id="webhook-url" value="https://example.com/api/synchub/events"><button class="btn btn-secondary" data-copy="#webhook-url"><svg data-icon="copy"></svg></button></div><span class="form-note">We’ll POST a signed JSON payload for selected workspace events.</span></div></div></div>
+    <div class="card" id="integrations"><div class="card-head"><div><h2>Webhook</h2><p>Forward SyncHub events to another service</p></div></div><div class="card-body"><div class="form-group"><label>Webhook URL</label><div style="display:flex;gap:8px"><input id="webhook-url" value=""><button class="btn btn-secondary" data-copy="#webhook-url"><svg data-icon="copy"></svg></button></div><span class="form-note">We’ll POST a signed JSON payload for selected workspace events.</span></div></div></div>
     <div class="card" id="security"><div class="card-head"><div><h2>Security</h2><p>Authentication and sensitive workspace actions</p></div></div><div class="card-body"><div class="setting-row"><div class="setting-copy"><strong>Two-factor authentication</strong><p>Require a second verification factor when signing in.</p></div><button class="btn btn-secondary btn-sm">Set up</button></div><div class="setting-row"><div class="setting-copy"><strong>Delete workspace</strong><p>Permanently remove all SyncHub projects, machines, and configuration.</p></div><button class="btn btn-danger btn-sm">Delete</button></div></div></div>
   </div>
 </div>
