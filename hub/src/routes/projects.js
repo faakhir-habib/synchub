@@ -3,9 +3,55 @@ import { requireUser } from "../lib/auth.js";
 import * as projects from "../models/projects.js";
 import * as mappings from "../models/mappings.js";
 import * as machines from "../models/machines.js";
+import * as conflicts from "../models/conflicts.js";
+import * as fileState from "../models/fileState.js";
+import * as events from "../models/events.js";
+import * as notifications from "../models/notifications.js";
 
-export function projectRoutes(db) {
+export function projectRoutes(db, store) {
   const r = Router();
+
+  // List open conflicts for a project.
+  r.get("/:id/conflicts", requireUser(db), (req, res) => {
+    const p = projects.findOwned(db, req.user.id, Number(req.params.id));
+    if (!p) return res.status(404).json({ error: "not found" });
+    res.json(conflicts.listOpenForProject(db, p.id));
+  });
+
+  // Resolve a conflict by keeping the "candidate" (pushed) or "canonical" version.
+  r.post("/:id/conflicts/:conflictId/resolve", requireUser(db), (req, res) => {
+    const p = projects.findOwned(db, req.user.id, Number(req.params.id));
+    if (!p) return res.status(404).json({ error: "not found" });
+    const c = conflicts.get(db, Number(req.params.conflictId));
+    if (!c || c.project_id !== p.id || c.status !== "open") {
+      return res.status(404).json({ error: "conflict not found" });
+    }
+    const choice = req.body?.choice === "canonical" ? "canonical" : "candidate";
+    const candidateName = conflicts.candidateFilename(c.filename, c.candidate_hash);
+
+    if (choice === "candidate") {
+      const content = store.read(req.user.id, p.id, candidateName);
+      if (content == null) return res.status(410).json({ error: "candidate content missing" });
+      const size = Buffer.byteLength(content, "utf8");
+      store.write(req.user.id, p.id, c.filename, content);
+      fileState.upsert(db, p.id, c.filename, c.candidate_hash, size, c.machine_id);
+      events.record(db, {
+        user_id: req.user.id, project_id: p.id, machine_id: c.machine_id,
+        type: "conflict_resolved", filename: c.filename, bytes: size,
+      });
+    } else {
+      events.record(db, {
+        user_id: req.user.id, project_id: p.id, type: "conflict_resolved", filename: c.filename,
+      });
+    }
+    store.remove(req.user.id, p.id, candidateName);
+    conflicts.resolve(db, c.id);
+    notifications.record(db, {
+      user_id: req.user.id, type: "sync",
+      title: `Conflict resolved: ${c.filename}`, body: `Kept the ${choice} version.`,
+    });
+    res.json({ status: "resolved", choice });
+  });
 
   r.get("/", requireUser(db), (req, res) => {
     res.json(projects.listForUser(db, req.user.id));

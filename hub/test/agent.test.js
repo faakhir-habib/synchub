@@ -64,12 +64,12 @@ test("push -> manifest -> pull round-trip; forward update; conflict on stale bas
     assert.equal(p2.status, 200);
     assert.equal(p2.body.status, "accepted");
 
-    // pushing again with the now-stale base_hash -> conflict
+    // pushing again with the now-stale base_hash but valid JSON tail -> auto-merged
     const p3 = await api(srv.url, "POST", `/api/agent/push/${projectId}`, {
       machineToken, body: { filename: fn, content: '{"a":1}\n{"c":9}\n', base_hash: hashA },
     });
-    assert.equal(p3.status, 409);
-    assert.equal(p3.body.status, "conflict");
+    assert.equal(p3.status, 200);
+    assert.equal(p3.body.status, "merged");
   } finally {
     await srv.close();
   }
