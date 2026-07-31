@@ -30,7 +30,7 @@ async function load() {
   list.querySelectorAll(".notification-item").forEach((n) => n.remove());
 
   if (!data.items.length) {
-    list.insertAdjacentHTML("beforeend", '<div class="notification-item"><div class="notification-copy"><p>No notifications yet.</p></div></div>');
+    list.insertAdjacentHTML("beforeend", '<div class="empty-state">No notifications yet.</div>');
     return;
   }
   for (const n of data.items) {

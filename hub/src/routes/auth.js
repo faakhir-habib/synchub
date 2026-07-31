@@ -36,17 +36,29 @@ export function authRoutes(db) {
     res.json({ ok: true });
   });
 
-  r.get("/me", requireUser(db), (req, res) => {
-    res.json({ id: req.user.id, email: req.user.email, name: req.user.name ?? null, notify_webhook_url: req.user.notify_webhook_url });
+  const publicUser = (u) => ({
+    id: u.id,
+    email: u.email,
+    name: u.name ?? null,
+    notify_webhook_url: u.notify_webhook_url,
+    notify_conflicts: u.notify_conflicts !== 0,
+    notify_sync: u.notify_sync !== 0,
   });
 
-  // Update profile — accepts any of { name, notify_webhook_url }.
+  r.get("/me", requireUser(db), (req, res) => {
+    res.json(publicUser(req.user));
+  });
+
+  // Update profile — accepts any of { name, notify_webhook_url, notify_conflicts, notify_sync }.
   r.put("/me", requireUser(db), (req, res) => {
+    const b = req.body || {};
     const fields = {};
-    if ("name" in (req.body || {})) fields.name = (req.body.name ?? "").toString().slice(0, 120) || null;
-    if ("notify_webhook_url" in (req.body || {})) fields.notify_webhook_url = req.body.notify_webhook_url || null;
+    if ("name" in b) fields.name = (b.name ?? "").toString().slice(0, 120) || null;
+    if ("notify_webhook_url" in b) fields.notify_webhook_url = b.notify_webhook_url || null;
+    if ("notify_conflicts" in b) fields.notify_conflicts = b.notify_conflicts ? 1 : 0;
+    if ("notify_sync" in b) fields.notify_sync = b.notify_sync ? 1 : 0;
     const u = users.updateProfile(db, req.user.id, fields);
-    res.json({ id: u.id, email: u.email, name: u.name ?? null, notify_webhook_url: u.notify_webhook_url });
+    res.json(publicUser(u));
   });
 
   r.put("/me/notify-webhook", requireUser(db), (req, res) => {

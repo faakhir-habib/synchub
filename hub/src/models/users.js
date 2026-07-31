@@ -18,13 +18,13 @@ export function setWebhook(db, id, url) {
   return findById(db, id);
 }
 
-// Update only the provided profile fields (name and/or webhook).
+// Update only the provided profile fields.
 export function updateProfile(db, id, fields) {
-  if (fields.name !== undefined) {
-    db.prepare("UPDATE users SET name = ? WHERE id = ?").run(fields.name, id);
-  }
-  if (fields.notify_webhook_url !== undefined) {
-    db.prepare("UPDATE users SET notify_webhook_url = ? WHERE id = ?").run(fields.notify_webhook_url, id);
+  const cols = { name: "name", notify_webhook_url: "notify_webhook_url", notify_conflicts: "notify_conflicts", notify_sync: "notify_sync" };
+  for (const [key, col] of Object.entries(cols)) {
+    if (fields[key] !== undefined) {
+      db.prepare(`UPDATE users SET ${col} = ? WHERE id = ?`).run(fields[key], id);
+    }
   }
   return findById(db, id);
 }

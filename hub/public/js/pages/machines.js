@@ -1,4 +1,4 @@
-import { Session, initShell, timeAgo, esc, renderIcons, rebind, toast, showModal } from "/js/app-shell.js";
+import { Session, initShell, timeAgo, esc, renderIcons, rebind, toast, showModal, modalConfirm } from "/js/app-shell.js";
 
 await initShell();
 await load();
@@ -36,7 +36,7 @@ async function load() {
   if (!grid) return;
   grid.innerHTML = "";
   if (!machines.length) {
-    grid.innerHTML = '<div class="card"><div class="card-body"><p class="form-note">No machines yet. Click “Connect machine” to pair one.</p></div></div>';
+    grid.innerHTML = '<div class="card" style="grid-column:1/-1"><div class="empty-state">No machines yet. Click “Connect machine” to pair one.</div></div>';
     return;
   }
   for (const m of machines) {
@@ -59,7 +59,8 @@ async function load() {
         <button class="btn btn-secondary btn-sm" data-del="${m.id}"><svg data-icon="trash"></svg>Remove</button>
       </div>`;
     card.querySelector("[data-del]").addEventListener("click", async () => {
-      if (!confirm(`Remove machine “${m.name}”? Its token stops working.`)) return;
+      const ok = await modalConfirm({ title: `Remove “${m.name}”?`, message: "Its agent token stops working. You can re-pair it later.", confirmLabel: "Remove", danger: true });
+      if (!ok) return;
       await Session.api("DELETE", `/api/machines/${m.id}`);
       toast("Machine removed"); load();
     });
