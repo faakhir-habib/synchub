@@ -2,9 +2,12 @@ import { Router } from "express";
 import { requireMachine } from "../lib/auth.js";
 import { hashContent } from "../lib/crypto.js";
 import { isSafeFilename } from "../lib/relayStore.js";
+import { autoMerge } from "../lib/merge.js";
 import * as mappings from "../models/mappings.js";
 import * as fileState from "../models/fileState.js";
 import * as events from "../models/events.js";
+import * as conflicts from "../models/conflicts.js";
+import * as notifications from "../models/notifications.js";
 
 // Agent-facing sync endpoints. Auth via X-Machine-Token (req.machine).
 // `store` is a relay store instance (see lib/relayStore.js).
@@ -64,14 +67,59 @@ export function agentRoutes(db, store) {
       return res.json({ status: "unchanged", hash: newHash });
     }
 
-    // Conflict: agent's edit was based on a version that is no longer canonical.
-    // (Full conflict handling — candidate storage, auto-merge — lands in Phase 3.)
+    // Divergence: agent's base is stale relative to canonical. Try to reconcile.
     if (current && base_hash !== current.hash) {
+      const userId = req.machine.user_id;
+      const canonicalContent = store.read(userId, projectId, filename) ?? "";
+      const m = autoMerge(canonicalContent, content);
+
+      // Incoming is behind canonical — nothing to do; tell the agent to pull.
+      if (m.kind === "behind") {
+        touch(req.machine);
+        return res.json({ status: "behind", hash: current.hash });
+      }
+
+      // Forward extension or clean append-merge — write the result as canonical.
+      if (m.kind === "forward" || m.kind === "merged") {
+        const finalContent = m.merged;
+        const finalHash = hashContent(finalContent);
+        const finalSize = Buffer.byteLength(finalContent, "utf8");
+        store.write(userId, projectId, filename, finalContent);
+        fileState.upsert(db, projectId, filename, finalHash, finalSize, req.machine.id);
+        events.record(db, {
+          user_id: userId, machine_id: req.machine.id, project_id: projectId,
+          type: m.kind === "merged" ? "auto_merge" : "push", filename, bytes: finalSize,
+        });
+        if (m.kind === "merged") {
+          const c = conflicts.open(db, projectId, filename, req.machine.id, finalHash);
+          conflicts.resolve(db, c.id);
+          db.prepare("UPDATE conflicts SET auto_merged = 1 WHERE id = ?").run(c.id);
+          notifications.record(db, {
+            user_id: userId, type: "sync", title: `Auto-merged ${filename}`,
+            body: `Diverging edits to ${filename} were merged automatically.`,
+          });
+        }
+        touch(req.machine);
+        return res.json({ status: m.kind === "merged" ? "merged" : "accepted", hash: finalHash });
+      }
+
+      // True conflict — park the candidate, open a conflict, notify. Canonical untouched.
+      const candidateName = conflicts.candidateFilename(filename, newHash);
+      store.write(userId, projectId, candidateName, content);
+      const c = conflicts.open(db, projectId, filename, req.machine.id, newHash);
+      notifications.record(db, {
+        user_id: userId, type: "conflict", title: `Conflict in ${filename}`,
+        body: `${filename} diverged and needs manual resolution.`,
+      });
+      events.record(db, {
+        user_id: userId, machine_id: req.machine.id, project_id: projectId,
+        type: "conflict", filename, bytes: Buffer.byteLength(content, "utf8"),
+      });
       touch(req.machine);
-      return res.status(409).json({ status: "conflict", currentHash: current.hash });
+      return res.status(409).json({ status: "conflict", conflictId: c.id });
     }
 
-    // Forward update: accept and make canonical.
+    // Forward update (first sync, or base matches canonical): accept and make canonical.
     store.write(req.machine.user_id, projectId, filename, content);
     const size = Buffer.byteLength(content, "utf8");
     fileState.upsert(db, projectId, filename, newHash, size, req.machine.id);

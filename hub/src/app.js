@@ -7,6 +7,7 @@ import { authRoutes } from "./routes/auth.js";
 import { machineRoutes, pairRedeemRoutes } from "./routes/machines.js";
 import { projectRoutes } from "./routes/projects.js";
 import { agentRoutes } from "./routes/agent.js";
+import { conflictRoutes } from "./routes/conflicts.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -27,7 +28,8 @@ export function createApp(db = openDb(), opts = {}) {
   app.use("/api/machines", machineRoutes(db));
   app.use("/api/agent", pairRedeemRoutes(db));
   app.use("/api/agent", agentRoutes(db, store));
-  app.use("/api/projects", projectRoutes(db));
+  app.use("/api/projects", projectRoutes(db, store));
+  app.use("/api/conflicts", conflictRoutes(db));
 
   app.get("/", (_req, res) => res.redirect("/login.html"));
   return app;
