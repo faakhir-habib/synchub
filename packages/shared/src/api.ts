@@ -74,7 +74,7 @@ export const WebhookUpdateRequest = z.object({
 export type WebhookUpdateRequest = z.infer<typeof WebhookUpdateRequest>;
 
 export const MachineCreateRequest = z.object({
-  name: z.string(),
+  name: z.string().min(1),
   os: z.string().optional(),
   os_version: z.string().optional(),
   label: z.string().optional(),

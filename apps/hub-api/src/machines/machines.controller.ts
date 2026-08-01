@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Req, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  ParseIntPipe,
+  Post,
+  Req,
+  UseGuards,
+} from "@nestjs/common";
 import type { User } from "@prisma/client";
 import type { Request } from "express";
 import { MachinesService } from "./machines.service.js";
@@ -30,8 +41,8 @@ export class MachinesController {
   }
 
   @Delete(":id")
-  remove(@CurrentUser() user: User, @Param("id") id: string) {
-    return this.machines.remove(user.id, Number(id));
+  remove(@CurrentUser() user: User, @Param("id", ParseIntPipe) id: number) {
+    return this.machines.remove(user.id, id);
   }
 
   @Post("pair")

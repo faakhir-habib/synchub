@@ -81,6 +81,19 @@ describe("POST /api/machines", () => {
     expect(res.body).toHaveProperty("code");
   });
 
+  it("returns 400 when name is an empty string", async () => {
+    const { token } = await signup();
+
+    const res = await request(app.getHttpServer())
+      .post("/api/machines")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "" });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toHaveProperty("error");
+    expect(res.body).toHaveProperty("code");
+  });
+
   it("requires authentication", async () => {
     const res = await request(app.getHttpServer())
       .post("/api/machines")
@@ -161,6 +174,15 @@ describe("DELETE /api/machines/:id", () => {
       .delete("/api/machines/999999999")
       .set("Authorization", `Bearer ${token}`);
     expect(res.status).toBe(404);
+    expect(res.body).toHaveProperty("error");
+  });
+
+  it("returns 400 (not 500) for a non-numeric id", async () => {
+    const { token } = await signup();
+    const res = await request(app.getHttpServer())
+      .delete("/api/machines/abc")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
     expect(res.body).toHaveProperty("error");
   });
 
