@@ -349,6 +349,68 @@ describe("POST /api/agent/push/:projectId", () => {
     expect(relayStore.readBlob(userId, canonicalHash)).toBe(canonicalContent);
   });
 
+  // This is deterministic regardless of actual scheduling/interleaving: the
+  // merge tail is sorted by each line's own `timestamp` field, not by which
+  // writer committed first, so the final union order is the same whether
+  // the two pushes truly race (one loses its CAS and retries against the
+  // other's committed result) or happen to run fully serialized (the second
+  // just reads the already-updated canonical on its first attempt). Either
+  // way, both lines must survive — that's the property under test.
+  it("concurrent divergent pushes to the SAME file do not lose an update (CAS + retry)", async () => {
+    const { userId, machine, project } = await setup();
+    const filename = "session.jsonl";
+
+    const line1 = '{"seq":1,"timestamp":100}';
+    const line2 = '{"seq":2,"timestamp":200}';
+    const canonicalContent = `${line1}\n${line2}\n`;
+    const canonicalHash = relayStore.writeBlob(userId, canonicalContent);
+    await prisma.fileState.create({
+      data: {
+        project_id: project.id,
+        filename,
+        hash: canonicalHash,
+        size: Buffer.byteLength(canonicalContent, "utf8"),
+      },
+    });
+
+    // Two machines each append their OWN different third line on top of the
+    // same 2-line canonical, at the same moment.
+    const lineX = '{"seq":3,"timestamp":300,"from":"x"}';
+    const lineY = '{"seq":3,"timestamp":250,"from":"y"}'; // earlier timestamp
+    const contentX = `${line1}\n${line2}\n${lineX}\n`;
+    const contentY = `${line1}\n${line2}\n${lineY}\n`;
+
+    // Fire both pushes concurrently — without CAS+retry, whichever write
+    // commits last would silently overwrite canonical with only its own
+    // tail, dropping the other machine's line despite both requests
+    // reporting a 200.
+    const [resX, resY] = await Promise.all([
+      push(machine.machineToken, project.id, { filename, content: contentX, base_hash: canonicalHash }),
+      push(machine.machineToken, project.id, { filename, content: contentY, base_hash: canonicalHash }),
+    ]);
+
+    expect(resX.status).toBe(200);
+    expect(resY.status).toBe(200);
+    expect(["accepted", "merged"]).toContain(resX.body.status);
+    expect(["accepted", "merged"]).toContain(resY.body.status);
+
+    const fileState = await prisma.fileState.findUnique({
+      where: { project_id_filename: { project_id: project.id, filename } },
+    });
+    expect(fileState).not.toBeNull();
+
+    const finalContent = relayStore.readBlob(userId, fileState!.hash);
+    expect(finalContent).not.toBeNull();
+
+    // No lost update: BOTH machines' lines survive, unioned and ordered by
+    // timestamp (lineY's 250 sorts before lineX's 300) regardless of commit order.
+    expect(finalContent).toBe(`${line1}\n${line2}\n${lineY}\n${lineX}\n`);
+
+    // The race must resolve via merge, never a spurious conflict row.
+    const conflictCount = await prisma.conflict.count({ where: { project_id: project.id, filename } });
+    expect(conflictCount).toBe(0);
+  });
+
   it("returns 404 for a project the machine is not mapped to", async () => {
     const { token } = await signup();
     const machine = await createMachine(token);

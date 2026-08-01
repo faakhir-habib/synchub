@@ -1,11 +1,21 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from "@nestjs/common";
 import { createHash } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import type { Machine } from "@prisma/client";
 import type { PushRequest } from "@synchub/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { RelayStoreService } from "./relay-store.service.js";
 import { MergeService } from "./merge.service.js";
 import { NotifyService } from "../notify/notify.service.js";
+import type { NotifyParams } from "../notify/notify.service.js";
 import { REALTIME_PORT } from "../realtime/realtime.port.js";
 import type { RealtimePort } from "../realtime/realtime.port.js";
 
@@ -44,6 +54,8 @@ export type PushResult =
 // Agent-facing sync endpoints. Ports legacy hub/src/routes/agent.js.
 @Injectable()
 export class SyncService {
+  private readonly logger = new Logger(SyncService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly relayStore: RelayStoreService,
@@ -117,6 +129,17 @@ export class SyncService {
   // overwrite. Whenever a canonical version already exists, we always run
   // autoMerge against it, so a stale/lying base_hash can extend or merge
   // canonical but can never silently drop lines the agent doesn't know about.
+  //
+  // Concurrency: this handler is async (unlike legacy's synchronous
+  // better-sqlite3 handler, which was atomic per-request by construction).
+  // Between reading `current` and committing the merge result there's a
+  // yield, so two concurrent pushes to the SAME file can both read the same
+  // `current`, each merge only their own tail, and the second write would
+  // silently clobber the first — a lost update despite both returning 200.
+  // `attemptPush` guards its canonical write with compare-and-swap (scoped
+  // to the hash it read); a lost race returns "retry" and we re-read + re-
+  // merge against the fresh canonical. Bounded so a pathological hot file
+  // can't spin forever.
   async push(machine: Machine, projectId: number, body: PushRequest): Promise<PushResult> {
     await this.requireMapping(machine, projectId);
 
@@ -129,152 +152,217 @@ export class SyncService {
 
     const newHash = createHash("sha256").update(content, "utf8").digest("hex");
 
+    const MAX_ATTEMPTS = 5;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const result = await this.attemptPush(machine, projectId, filename, content, newHash, started);
+      if (result !== "retry") {
+        return result;
+      }
+    }
+
+    // Retries exhausted: pathological contention (every one of MAX_ATTEMPTS
+    // attempts lost its CAS to a concurrent writer on the same file). This
+    // should essentially never happen in practice. Surface as 503 rather
+    // than guessing at an outcome — this must never masquerade as a
+    // resolved "accepted"/"merged"/"conflict" result, since none of those
+    // actually committed. The agent already retries pushes on failure.
+    throw new HttpException(
+      { error: "push contention exhausted retries, please retry", code: "push_contention" },
+      HttpStatus.SERVICE_UNAVAILABLE,
+    );
+  }
+
+  // One attempt of the push decision tree. Returns the terminal PushResult,
+  // or the string "retry" if a concurrent writer won a compare-and-swap race
+  // and the caller should re-read canonical and try again.
+  private async attemptPush(
+    machine: Machine,
+    projectId: number,
+    filename: string,
+    content: string,
+    newHash: string,
+    started: number,
+  ): Promise<PushResult | "retry"> {
     const current = await this.prisma.fileState.findUnique({
       where: { project_id_filename: { project_id: projectId, filename } },
     });
 
-    // No-op: agent already has the canonical version.
-    if (current && current.hash === newHash) {
-      await this.touch(machine);
-      return { status: "unchanged", hash: newHash };
-    }
+    if (!current) {
+      // First sync for this file. Another machine's first-sync push for the
+      // SAME (project_id, filename) could land concurrently, so use a plain
+      // `create` (not `upsert`) — the unique constraint turns that race into
+      // a P2002 we can retry against, instead of one writer silently
+      // clobbering the other's canonical.
+      const hash = this.relayStore.writeBlob(machine.user_id, content);
+      const size = Buffer.byteLength(content, "utf8");
+      const latencyMs = Date.now() - started;
 
-    if (current) {
-      const canonical = this.relayStore.readBlob(machine.user_id, current.hash) ?? "";
-      const m = this.merge.autoMerge(canonical, content);
-
-      // Incoming is behind canonical — nothing to do; tell the agent to pull.
-      if (m.kind === "behind") {
-        await this.touch(machine);
-        return { status: "behind", hash: current.hash };
-      }
-
-      // Forward extension or clean append-merge — write the result as canonical.
-      if (m.kind === "forward" || m.kind === "merged") {
-        const finalContent = m.merged as string;
-        // Content-addressed write is durable + idempotent — do it before the
-        // DB transaction so a crash between the two never loses the blob.
-        const finalHash = this.relayStore.writeBlob(machine.user_id, finalContent);
-        const finalSize = Buffer.byteLength(finalContent, "utf8");
-        const latencyMs = Date.now() - started;
-
+      try {
         await this.prisma.$transaction(async (tx) => {
-          await tx.fileState.upsert({
-            where: { project_id_filename: { project_id: projectId, filename } },
-            create: {
-              project_id: projectId,
-              filename,
-              hash: finalHash,
-              size: finalSize,
-              last_machine_id: machine.id,
-            },
-            update: {
-              hash: finalHash,
-              size: finalSize,
-              last_machine_id: machine.id,
-              updated_at: new Date(),
-            },
+          await tx.fileState.create({
+            data: { project_id: projectId, filename, hash, size, last_machine_id: machine.id },
           });
           await tx.event.create({
             data: {
               user_id: machine.user_id,
               machine_id: machine.id,
               project_id: projectId,
-              type: m.kind === "merged" ? "auto_merge" : "push",
+              type: "push",
               filename,
-              bytes: finalSize,
+              bytes: size,
               latency_ms: latencyMs,
             },
           });
         });
-
-        // §7.4 fix: no fabricated conflict row for an auto-merge — the
-        // auto_merge event above IS the audit trail.
-        if (m.kind === "merged") {
-          await this.notify.notify({
-            user_id: machine.user_id,
-            type: "sync",
-            title: `Auto-merged ${filename}`,
-            body: `Diverging edits to ${filename} were merged automatically.`,
-          });
+      } catch (err) {
+        if (this.isUniqueConstraintError(err)) {
+          // Someone else's first-sync won; retry will see `current` and
+          // autoMerge against it instead of losing this push's content.
+          return "retry";
         }
-
-        this.realtime.notifyProjectChanged(projectId, {
-          filename,
-          hash: finalHash,
-          excludeMachineId: machine.id,
-        });
-        await this.touch(machine);
-        return { status: m.kind === "merged" ? "merged" : "accepted", hash: finalHash };
+        throw err;
       }
 
-      // True conflict — park the candidate (keyed by its own full hash — §7.4
-      // fix), open a conflict, notify. Canonical untouched.
-      const candidateHash = this.relayStore.writeBlob(machine.user_id, content);
-      let conflictId!: number;
+      this.realtime.notifyProjectChanged(projectId, { filename, hash, excludeMachineId: machine.id });
+      await this.touch(machine);
+      return { status: "accepted", hash };
+    }
 
+    // No-op: agent already has the canonical version.
+    if (current.hash === newHash) {
+      await this.touch(machine);
+      return { status: "unchanged", hash: newHash };
+    }
+
+    const canonical = this.relayStore.readBlob(machine.user_id, current.hash) ?? "";
+    const m = this.merge.autoMerge(canonical, content);
+
+    // Incoming is behind canonical — nothing to do; tell the agent to pull.
+    if (m.kind === "behind") {
+      await this.touch(machine);
+      return { status: "behind", hash: current.hash };
+    }
+
+    // Forward extension or clean append-merge — write the result as canonical.
+    if (m.kind === "forward" || m.kind === "merged") {
+      const finalContent = m.merged as string;
+      // Content-addressed write is durable + idempotent — safe to do before
+      // the CAS regardless of whether this attempt wins: a losing attempt
+      // just leaves an orphan blob, reclaimed later by GC.
+      const finalHash = this.relayStore.writeBlob(machine.user_id, finalContent);
+      const finalSize = Buffer.byteLength(finalContent, "utf8");
+      const latencyMs = Date.now() - started;
+
+      // Compare-and-swap: only commit if canonical is still exactly the
+      // `current.hash` we read above. If another push already moved it,
+      // `count` is 0 and we retry against the fresh canonical instead of
+      // clobbering it. The event is created in the SAME transaction as the
+      // guarded update, so it only ever records on a successful CAS.
+      let casCount = 0;
       await this.prisma.$transaction(async (tx) => {
-        const c = await tx.conflict.create({
-          data: {
-            project_id: projectId,
-            filename,
-            machine_id: machine.id,
-            candidate_hash: candidateHash,
-            auto_merged: 0,
-            status: "open",
-          },
+        const updated = await tx.fileState.updateMany({
+          where: { project_id: projectId, filename, hash: current.hash },
+          data: { hash: finalHash, size: finalSize, last_machine_id: machine.id, updated_at: new Date() },
         });
-        conflictId = c.id;
+        casCount = updated.count;
+        if (casCount === 0) return;
+
         await tx.event.create({
           data: {
             user_id: machine.user_id,
             machine_id: machine.id,
             project_id: projectId,
-            type: "conflict",
+            type: m.kind === "merged" ? "auto_merge" : "push",
             filename,
-            bytes: Buffer.byteLength(content, "utf8"),
-            // legacy records no latency_ms on the conflict path
+            bytes: finalSize,
+            latency_ms: latencyMs,
           },
         });
       });
 
-      await this.notify.notify({
-        user_id: machine.user_id,
-        type: "conflict",
-        title: `Conflict in ${filename}`,
-        body: `${filename} diverged and needs manual resolution.`,
+      if (casCount === 0) {
+        return "retry";
+      }
+
+      // §7.4 fix: no fabricated conflict row for an auto-merge — the
+      // auto_merge event above IS the audit trail.
+      if (m.kind === "merged") {
+        await this.notifyBestEffort({
+          user_id: machine.user_id,
+          type: "sync",
+          title: `Auto-merged ${filename}`,
+          body: `Diverging edits to ${filename} were merged automatically.`,
+        });
+      }
+
+      this.realtime.notifyProjectChanged(projectId, {
+        filename,
+        hash: finalHash,
+        excludeMachineId: machine.id,
       });
       await this.touch(machine);
-      return { status: "conflict", conflictId };
+      return { status: m.kind === "merged" ? "merged" : "accepted", hash: finalHash };
     }
 
-    // First sync (no canonical yet): accept and make canonical.
-    const hash = this.relayStore.writeBlob(machine.user_id, content);
-    const size = Buffer.byteLength(content, "utf8");
-    const latencyMs = Date.now() - started;
+    // True conflict — park the candidate (keyed by its own full hash — §7.4
+    // fix), open a conflict, notify. Canonical untouched, so there's no CAS
+    // risk here and this branch is never retried.
+    const candidateHash = this.relayStore.writeBlob(machine.user_id, content);
+    let conflictId!: number;
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.fileState.upsert({
-        where: { project_id_filename: { project_id: projectId, filename } },
-        create: { project_id: projectId, filename, hash, size, last_machine_id: machine.id },
-        update: { hash, size, last_machine_id: machine.id, updated_at: new Date() },
+      const c = await tx.conflict.create({
+        data: {
+          project_id: projectId,
+          filename,
+          machine_id: machine.id,
+          candidate_hash: candidateHash,
+          auto_merged: 0,
+          status: "open",
+        },
       });
+      conflictId = c.id;
       await tx.event.create({
         data: {
           user_id: machine.user_id,
           machine_id: machine.id,
           project_id: projectId,
-          type: "push",
+          type: "conflict",
           filename,
-          bytes: size,
-          latency_ms: latencyMs,
+          bytes: Buffer.byteLength(content, "utf8"),
+          // legacy records no latency_ms on the conflict path
         },
       });
     });
 
-    this.realtime.notifyProjectChanged(projectId, { filename, hash, excludeMachineId: machine.id });
+    await this.notifyBestEffort({
+      user_id: machine.user_id,
+      type: "conflict",
+      title: `Conflict in ${filename}`,
+      body: `${filename} diverged and needs manual resolution.`,
+    });
     await this.touch(machine);
-    return { status: "accepted", hash };
+    return { status: "conflict", conflictId };
+  }
+
+  // Notifications are best-effort: a canonical write or conflict row is
+  // already durably committed by the time this runs, so a notify failure
+  // (e.g. a transient DB hiccup) must not turn an otherwise-successful push
+  // into a 500.
+  private async notifyBestEffort(params: NotifyParams): Promise<void> {
+    try {
+      await this.notify.notify(params);
+    } catch (err) {
+      this.logger.error(
+        `notify failed (user_id=${params.user_id}, type=${params.type}): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  private isUniqueConstraintError(err: unknown): boolean {
+    return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
   }
 
   // Require that `machine` is mapped into `projectId`; throws 404 otherwise.
