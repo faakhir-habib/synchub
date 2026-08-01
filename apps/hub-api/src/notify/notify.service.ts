@@ -1,6 +1,9 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import type { Notification } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { assertPublicHttpUrl } from "../common/net/ssrf.js";
+import { REALTIME_PORT } from "../realtime/realtime.port.js";
+import type { RealtimePort } from "../realtime/realtime.port.js";
 
 export interface NotifyParams {
   user_id: number;
@@ -9,16 +12,19 @@ export interface NotifyParams {
   body?: string | null;
 }
 
-// Ports legacy hub/src/lib/notify.js#notifyUser. This is the CORE only: load
-// the user, apply the notification-preference gate, and insert the row.
-//
-// The WS-push and per-user webhook relay from the legacy implementation are
-// deliberately NOT ported here — they land in Phase 2c as additive hooks
-// (see the TODOs below) that must not change this method's signature or
-// return type.
+const WEBHOOK_TIMEOUT_MS = 5000;
+
+// Ports legacy hub/src/lib/notify.js#notifyUser: load the user, apply the
+// notification-preference gate, insert the row, then fan out live over WS
+// and (best-effort, SSRF-guarded) to the user's personal webhook.
 @Injectable()
 export class NotifyService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(NotifyService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(REALTIME_PORT) private readonly realtime: RealtimePort,
+  ) {}
 
   async notify({ user_id, type, title, body = null }: NotifyParams): Promise<Notification | null> {
     const user = await this.prisma.user.findUnique({ where: { id: user_id } });
@@ -34,10 +40,47 @@ export class NotifyService {
       data: { user_id, type, title, body },
     });
 
-    // TODO(2c): this.realtime?.pushNotification(user_id, note);
-    // TODO(2c): fire SSRF-guarded webhook to user.notify_webhook_url (best-effort,
-    // must never block or throw — mirrors the legacy fetch(...).catch(() => {})).
+    // Live push to the user's browsers. Fire-and-forget: RealtimePort methods
+    // are void/best-effort by contract (see realtime.port.ts) and the
+    // gateway degrades gracefully when the user has no open sockets.
+    try {
+      this.realtime.pushNotification(user_id, { type, title, body });
+    } catch (err) {
+      this.logger.warn(
+        `pushNotification failed (user_id=${user_id}, type=${type}): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+
+    // Best-effort relay to the user's personal webhook, mirroring legacy
+    // hub/src/lib/notify.js's fetch(...).catch(() => {}) — SSRF-guarded and
+    // fully try/caught so a bad/blocked/unreachable webhook can never affect
+    // the already-committed notification row or throw out of notify().
+    if (user.notify_webhook_url) {
+      void this.relayWebhook(user.notify_webhook_url, { type, title, body });
+    }
 
     return note;
+  }
+
+  private async relayWebhook(
+    url: string,
+    payload: { type: string; title: string; body?: string | null },
+  ): Promise<void> {
+    try {
+      await assertPublicHttpUrl(url);
+      await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...payload, at: new Date().toISOString() }),
+        signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+        redirect: "error",
+      });
+    } catch (err) {
+      this.logger.warn(
+        `notify webhook failed (url=${url}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 }
