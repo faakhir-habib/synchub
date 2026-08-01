@@ -6,9 +6,11 @@ import request from "supertest";
 import { randomBytes } from "node:crypto";
 import { AppModule } from "../src/app.module.js";
 import { PrismaService } from "../src/prisma/prisma.service.js";
+import { AllExceptionsFilter } from "../src/common/errors/all-exceptions.filter.js";
 import { SessionAuthGuard } from "../src/common/auth/session-auth.guard.js";
 import { MachineAuthGuard } from "../src/common/auth/machine-auth.guard.js";
 import { CurrentUser, CurrentMachine } from "../src/common/auth/current-user.decorator.js";
+import { SESSION_TTL_MS } from "../src/common/auth/session.constants.js";
 
 // Throwaway controllers used only to exercise the guards + param decorators
 // without depending on any real feature route.
@@ -38,6 +40,8 @@ let userId: number;
 let validToken: string;
 let expiredToken: string;
 let nullExpiryToken: string;
+let dueForRefreshToken: string;
+let freshToken: string;
 let machineId: number;
 let machineToken: string;
 
@@ -47,6 +51,7 @@ beforeAll(async () => {
     controllers: [ThrowawayAuthController],
   }).compile();
   app = mod.createNestApplication();
+  app.useGlobalFilters(new AllExceptionsFilter());
   await app.init();
 
   prisma = app.get(PrismaService);
@@ -78,6 +83,26 @@ beforeAll(async () => {
     data: { token: nullExpiryToken, user_id: userId, expires_at: null },
   });
 
+  // Well under half the 30-day TTL remaining -> guard should extend it.
+  dueForRefreshToken = `sess_${rand()}`;
+  await prisma.session.create({
+    data: {
+      token: dueForRefreshToken,
+      user_id: userId,
+      expires_at: new Date(Date.now() + 60 * 60 * 1000),
+    },
+  });
+
+  // More than half the TTL remaining -> guard should NOT touch it.
+  freshToken = `sess_${rand()}`;
+  await prisma.session.create({
+    data: {
+      token: freshToken,
+      user_id: userId,
+      expires_at: new Date(Date.now() + SESSION_TTL_MS - 60 * 1000),
+    },
+  });
+
   const machine = await prisma.machine.create({
     data: {
       user_id: userId,
@@ -100,7 +125,8 @@ describe("SessionAuthGuard", () => {
   it("401s with no Authorization header", async () => {
     const res = await request(app.getHttpServer()).get("/throwaway-auth/session");
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: "unauthorized" });
+    expect(res.body.error).toBe("unauthorized");
+    expect(res.body).toHaveProperty("code");
   });
 
   it("401s with a bad bearer token", async () => {
@@ -108,7 +134,8 @@ describe("SessionAuthGuard", () => {
       .get("/throwaway-auth/session")
       .set("Authorization", "Bearer nope-not-a-real-token");
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: "unauthorized" });
+    expect(res.body.error).toBe("unauthorized");
+    expect(res.body).toHaveProperty("code");
   });
 
   it("200s and echoes the user id for a valid, unexpired session", async () => {
@@ -124,7 +151,8 @@ describe("SessionAuthGuard", () => {
       .get("/throwaway-auth/session")
       .set("Authorization", `Bearer ${expiredToken}`);
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: "unauthorized" });
+    expect(res.body.error).toBe("unauthorized");
+    expect(res.body).toHaveProperty("code");
   });
 
   it("401s for a session with expires_at = null", async () => {
@@ -132,7 +160,33 @@ describe("SessionAuthGuard", () => {
       .get("/throwaway-auth/session")
       .set("Authorization", `Bearer ${nullExpiryToken}`);
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: "unauthorized" });
+    expect(res.body.error).toBe("unauthorized");
+    expect(res.body).toHaveProperty("code");
+  });
+
+  it("extends expires_at (sliding refresh) when remaining lifetime is under half the TTL", async () => {
+    const res = await request(app.getHttpServer())
+      .get("/throwaway-auth/session")
+      .set("Authorization", `Bearer ${dueForRefreshToken}`);
+    expect(res.status).toBe(200);
+
+    const session = await prisma.session.findUnique({ where: { token: dueForRefreshToken } });
+    expect(session?.expires_at).not.toBeNull();
+    const remainingMs = session!.expires_at!.getTime() - Date.now();
+    // Was ~1h remaining; should now be back up near the full 30-day TTL.
+    expect(remainingMs).toBeGreaterThan(20 * 24 * 60 * 60 * 1000);
+  });
+
+  it("does not touch expires_at when remaining lifetime is over half the TTL (throttled)", async () => {
+    const before = await prisma.session.findUnique({ where: { token: freshToken } });
+
+    const res = await request(app.getHttpServer())
+      .get("/throwaway-auth/session")
+      .set("Authorization", `Bearer ${freshToken}`);
+    expect(res.status).toBe(200);
+
+    const after = await prisma.session.findUnique({ where: { token: freshToken } });
+    expect(after?.expires_at?.getTime()).toBe(before?.expires_at?.getTime());
   });
 });
 
@@ -142,13 +196,15 @@ describe("MachineAuthGuard", () => {
       .get("/throwaway-auth/machine")
       .set("X-Machine-Token", "nope-not-a-real-token");
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: "unauthorized" });
+    expect(res.body.error).toBe("unauthorized");
+    expect(res.body).toHaveProperty("code");
   });
 
   it("401s with no X-Machine-Token header", async () => {
     const res = await request(app.getHttpServer()).get("/throwaway-auth/machine");
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: "unauthorized" });
+    expect(res.body.error).toBe("unauthorized");
+    expect(res.body).toHaveProperty("code");
   });
 
   it("200s and echoes the machine id for a valid token", async () => {
