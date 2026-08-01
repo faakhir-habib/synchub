@@ -11,11 +11,13 @@ import { NotifyModule } from "./notify/notify.module.js";
 import { NotificationsModule } from "./notifications/notifications.module.js";
 import { ConflictsModule } from "./conflicts/conflicts.module.js";
 import { DashboardModule } from "./dashboard/dashboard.module.js";
+import { RealtimeModule } from "./realtime/realtime.module.js";
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
     PrismaModule,
+    RealtimeModule,
     AuthModule,
     UsersModule,
     MachinesModule,
