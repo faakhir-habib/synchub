@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import {
   closeSync,
@@ -54,17 +54,29 @@ export class RelayStoreService {
     return createHash("sha256").update(content, "utf8").digest("hex");
   }
 
-  private userDir(userId: string): string {
+  // Blob paths are built from caller-supplied hashes (endpoints will pass a
+  // request param straight through). Enforce the sha-256 hex shape *before*
+  // it's ever joined into a filesystem path, so a value like
+  // "../../etc/passwd" is rejected structurally rather than relying on
+  // callers to sanitize.
+  private assertHash(hash: string): void {
+    if (!/^[0-9a-f]{64}$/.test(hash)) {
+      throw new BadRequestException(`invalid blob hash: ${JSON.stringify(hash)}`);
+    }
+  }
+
+  private userDir(userId: number): string {
     return join(this.baseDir, String(userId), "blobs");
   }
 
-  private blobPath(userId: string, hash: string): string {
+  private blobPath(userId: number, hash: string): string {
     return join(this.userDir(userId), hash);
   }
 
   /** Hash `content`, store it write-once at the content-addressed path, and return the hash. */
-  writeBlob(userId: string, content: string): string {
+  writeBlob(userId: number, content: string): string {
     const hash = this.hashOf(content);
+    this.assertHash(hash); // sanity check on our own computed hash
     if (this.hasBlob(userId, hash)) return hash;
 
     const dir = this.userDir(userId);
@@ -73,19 +85,21 @@ export class RelayStoreService {
     const tmpPath = join(dir, `${hash}.${this.tmpCounter++}.tmp`);
     const finalPath = this.blobPath(userId, hash);
 
-    const fd = openSync(tmpPath, "w");
     try {
-      writeSync(fd, content, null, "utf8");
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
+      const fd = openSync(tmpPath, "w");
+      try {
+        writeSync(fd, content, null, "utf8");
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
 
-    try {
       renameSync(tmpPath, finalPath);
     } catch (err) {
-      // Clean up the temp file if the rename itself failed, so we don't
-      // leak *.tmp files on error.
+      // Any failure during the write phase (open/write/fsync/rename — e.g.
+      // ENOSPC disk-full, which is exactly the case this store must survive)
+      // must not leak the temp file: listBlobHashes filters *.tmp names, so
+      // an orphaned temp file would never be reclaimed by gcOrphans.
       try {
         rmSync(tmpPath, { force: true });
       } catch {
@@ -113,23 +127,33 @@ export class RelayStoreService {
   }
 
   /** Read blob content by hash, or null if it doesn't exist. */
-  readBlob(userId: string, hash: string): string | null {
+  readBlob(userId: number, hash: string): string | null {
+    this.assertHash(hash);
     const p = this.blobPath(userId, hash);
-    return existsSync(p) ? readFileSync(p, "utf8") : null;
+    try {
+      return readFileSync(p, "utf8");
+    } catch (err) {
+      // Guard against a TOCTOU race with a concurrent removeBlob/gcOrphans:
+      // treat "gone by the time we read it" the same as "never existed".
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw err;
+    }
   }
 
-  hasBlob(userId: string, hash: string): boolean {
+  hasBlob(userId: number, hash: string): boolean {
+    this.assertHash(hash);
     return existsSync(this.blobPath(userId, hash));
   }
 
   /** Delete a blob if present; no-op if absent. */
-  removeBlob(userId: string, hash: string): void {
+  removeBlob(userId: number, hash: string): void {
+    this.assertHash(hash);
     const p = this.blobPath(userId, hash);
     if (existsSync(p)) rmSync(p);
   }
 
   /** All hashes currently stored for `userId` (excludes in-flight *.tmp files). */
-  listBlobHashes(userId: string): string[] {
+  listBlobHashes(userId: number): string[] {
     const dir = this.userDir(userId);
     if (!existsSync(dir)) return [];
     return readdirSync(dir).filter((name) => !name.endsWith(".tmp"));
@@ -140,7 +164,7 @@ export class RelayStoreService {
    * (e.g. not pointed at by any file_state.hash / conflict.candidate_hash
    * row). Returns the number of blobs deleted.
    */
-  gcOrphans(userId: string, referenced: Set<string>): number {
+  gcOrphans(userId: number, referenced: Set<string>): number {
     let deleted = 0;
     for (const hash of this.listBlobHashes(userId)) {
       if (!referenced.has(hash)) {

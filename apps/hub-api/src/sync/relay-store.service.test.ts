@@ -15,7 +15,8 @@ const TEST_DIR = join(tmpdir(), "synchub-relay-store-service-test");
 process.env.RELAY_STORE_DIR = TEST_DIR;
 
 describe("RelayStoreService", () => {
-  const userId = "user-1";
+  // userId is always a numeric Prisma user id.
+  const userId = 1;
   let svc: InstanceType<typeof RelayStoreService>;
 
   beforeAll(() => {
@@ -47,7 +48,7 @@ describe("RelayStoreService", () => {
     const h2 = svc.writeBlob(userId, content);
     expect(h2).toBe(h1);
 
-    const userDir = join(TEST_DIR, userId, "blobs");
+    const userDir = join(TEST_DIR, String(userId), "blobs");
     const matches = readdirSync(userDir).filter((n) => n === h1);
     expect(matches).toHaveLength(1);
   });
@@ -72,7 +73,7 @@ describe("RelayStoreService", () => {
   });
 
   it("listBlobHashes includes orphan blobs written with no DB pointer (simulated crash orphan)", () => {
-    const orphanUserId = "user-orphan-list";
+    const orphanUserId = 2;
     const a = svc.writeBlob(orphanUserId, '{"t":"a"}\n');
     // "orphan" here just means: written to the store with nothing in a DB
     // pointing at it — RelayStoreService has no notion of a DB, so simply
@@ -84,11 +85,11 @@ describe("RelayStoreService", () => {
   });
 
   it("listBlobHashes returns an empty array for a user with no blobs", () => {
-    expect(svc.listBlobHashes("user-never-written")).toEqual([]);
+    expect(svc.listBlobHashes(999999)).toEqual([]);
   });
 
   it("gcOrphans deletes blobs not in the referenced set and returns the count deleted; referenced blobs survive", () => {
-    const gcUserId = "user-gc";
+    const gcUserId = 3;
     const keep = svc.writeBlob(gcUserId, '{"t":"keep"}\n');
     const drop1 = svc.writeBlob(gcUserId, '{"t":"drop1"}\n');
     const drop2 = svc.writeBlob(gcUserId, '{"t":"drop2"}\n');
@@ -111,7 +112,17 @@ describe("RelayStoreService", () => {
   it("stores blobs at a path derived from the hash, under <baseDir>/<userId>/blobs/<hash>", () => {
     const content = '{"t":"path-check"}\n';
     const hash = svc.writeBlob(userId, content);
-    const expectedPath = join(TEST_DIR, userId, "blobs", hash);
+    const expectedPath = join(TEST_DIR, String(userId), "blobs", hash);
     expect(existsSync(expectedPath)).toBe(true);
+  });
+
+  it("rejects a non-64-hex hash (path-traversal attempt) instead of reading outside baseDir", () => {
+    expect(() => svc.readBlob(userId, "../../etc/passwd")).toThrow();
+    expect(() => svc.hasBlob(userId, "../../etc/passwd")).toThrow();
+    expect(() => svc.removeBlob(userId, "../../etc/passwd")).toThrow();
+  });
+
+  it("readBlob returns null (not an error) for a well-formed but absent hash", () => {
+    expect(svc.readBlob(userId, "a".repeat(64))).toBeNull();
   });
 });
