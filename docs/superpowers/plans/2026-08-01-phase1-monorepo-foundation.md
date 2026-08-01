@@ -13,7 +13,13 @@
 - `hub/src/routes/agent.js` → sync-protocol shapes (`manifest`/`pull`/`push`)
 - `hub/src/lib/realtime.js` → WebSocket message shapes
 
-**Environment note:** Node v24 and corepack are installed; pnpm is provided via corepack (Task 1). All commands assume repo root `C:\projects\synchub`. Bash tool syntax shown; on PowerShell adapt env-var syntax.
+**Environment note:** Node v24 and corepack are installed; pnpm is provided via corepack (Task 1). All commands assume repo root `C:\projects\synchub`.
+
+**Windows / PowerShell command translation (the dev box is Windows PowerShell 5.1 — apply to EVERY multi-command or env-var step below):**
+- `A && B` (bash) → `A; if ($?) { B }` (PowerShell), or split into two calls. `&&` is a parse error in PS 5.1.
+- `VAR=value cmd` (bash inline env) → `$env:VAR = "value"; cmd` (PowerShell). The bash inline form is invalid in PS.
+- `cd dir && cmd && cd ..` → run `cmd` with a package filter from root instead (e.g. `pnpm --filter @synchub/hub-api exec prisma ...`) to avoid `cd`.
+- Every code block shows the **bash** form; the paired PowerShell form is given inline where env vars or chaining are involved. On the Bash tool, use the bash form as-is.
 
 ---
 
@@ -43,7 +49,9 @@ synchub/
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   ├── nest-cli.json
-│   │   ├── prisma/schema.prisma     # 1:1 translation of schema.sql
+│   │   ├── vitest.config.ts         # SWC transform → decorator metadata for DI
+│   │   ├── .env                      # DATABASE_URL (git-ignored)
+│   │   ├── prisma/schema.prisma     # 1:1 translation of schema.sql (+@@map, SET NULL)
 │   │   ├── src/
 │   │   │   ├── main.ts
 │   │   │   ├── app.module.ts
@@ -78,9 +86,13 @@ synchub/
 
 - [ ] **Step 1: Enable pnpm via corepack**
 
-Run:
+Run (bash):
 ```bash
 corepack enable pnpm && corepack prepare pnpm@9.15.0 --activate && pnpm --version
+```
+PowerShell:
+```powershell
+corepack enable pnpm; corepack prepare pnpm@9.15.0 --activate; pnpm --version
 ```
 Expected: prints `9.15.0`.
 
@@ -251,17 +263,31 @@ git commit -m "chore(monorepo): shared tsconfig, eslint (flat), prettier"
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
     "test": "vitest run"
   },
   "dependencies": { "zod": "^3.24.1" },
-  "devDependencies": { "typescript": "^5.7.2", "vitest": "^2.1.8" }
+  "devDependencies": { "tsup": "^8.3.5", "typescript": "^5.7.2", "vitest": "^2.1.8" }
 }
 ```
+
+**Why dual CJS+ESM (interop fix):** `hub-api` compiles to CommonJS (NestJS +
+decorators) and would `require()` this package; `hub-web` (Vite) and `agent`
+(NodeNext ESM) `import` it. Publishing both `require` (`.cjs`) and `import`
+(`.js`) builds via `tsup` means neither consumer ever hits Node's `ERR_REQUIRE_ESM`
+on a value import (e.g. a zod schema used in a Phase 2 controller). Do NOT ship
+ESM-only here.
 
 - [ ] **Step 2: Create `packages/shared/tsconfig.json`**
 
@@ -322,12 +348,14 @@ export type AgentMapping = z.infer<typeof AgentMapping>;
 ```ts
 import { z } from "zod";
 
+// --- Handshake (both directions) ---
 export const WsWelcome = z.object({
   type: z.literal("welcome"),
   machineId: z.number().int().optional(),
   userId: z.number().int().optional(),
 });
 
+// --- Agent-directed: pull this file (also reused browser-side as invalidation) ---
 export const WsChanged = z.object({
   type: z.literal("changed"),
   projectId: z.number().int(),
@@ -335,11 +363,48 @@ export const WsChanged = z.object({
   hash: z.string(),
 });
 
-export const WsSync = z.object({
-  type: z.literal("sync"),
+// --- Agent-directed: manual-mode "sync now" trigger (renamed from "sync") ---
+export const WsSyncTrigger = z.object({
+  type: z.literal("sync-trigger"),
   projectId: z.number().int(),
 });
 
+// --- Browser-directed: live machine presence (NEW — did not exist before) ---
+export const WsPresence = z.object({
+  type: z.literal("presence"),
+  machineId: z.number().int(),
+  status: z.enum(["online", "offline"]),
+  lastSeenAt: z.string().nullable(),
+});
+
+// --- Browser-directed: live per-file sync progress (NEW) ---
+export const WsSyncProgress = z.object({
+  type: z.literal("sync-progress"),
+  projectId: z.number().int(),
+  machineId: z.number().int(),
+  filename: z.string().optional(),
+  completed: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+  phase: z.enum(["scan", "push", "pull"]),
+});
+
+// --- Browser-directed: a reconcile finished (NEW) ---
+export const WsSyncComplete = z.object({
+  type: z.literal("sync-complete"),
+  projectId: z.number().int(),
+  machineId: z.number().int().optional(),
+  at: z.string(),
+});
+
+// --- Browser-directed: live conflict surfacing (NEW) ---
+export const WsConflict = z.object({
+  type: z.literal("conflict"),
+  projectId: z.number().int(),
+  filename: z.string(),
+  conflictId: z.number().int(),
+});
+
+// --- Browser-directed: notification ---
 export const WsNotification = z.object({
   type: z.literal("notification"),
   notification: z.object({
@@ -352,7 +417,11 @@ export const WsNotification = z.object({
 export const WsMessage = z.discriminatedUnion("type", [
   WsWelcome,
   WsChanged,
-  WsSync,
+  WsSyncTrigger,
+  WsPresence,
+  WsSyncProgress,
+  WsSyncComplete,
+  WsConflict,
   WsNotification,
 ]);
 export type WsMessage = z.infer<typeof WsMessage>;
@@ -474,6 +543,28 @@ describe("shared schemas round-trip", () => {
     });
     expect(msg.type).toBe("changed");
   });
+
+  it("discriminates a WsPresence message (realtime contract)", () => {
+    const msg = WsMessage.parse({
+      type: "presence",
+      machineId: 7,
+      status: "online",
+      lastSeenAt: null,
+    });
+    expect(msg.type).toBe("presence");
+  });
+
+  it("discriminates a WsSyncProgress message (realtime contract)", () => {
+    const msg = WsMessage.parse({
+      type: "sync-progress",
+      projectId: 1,
+      machineId: 7,
+      completed: 2,
+      total: 5,
+      phase: "push",
+    });
+    expect(msg.type).toBe("sync-progress");
+  });
 });
 ```
 
@@ -491,7 +582,7 @@ Run:
 ```bash
 pnpm --filter @synchub/shared test
 ```
-Expected: 3 tests PASS. If a TS import path error appears, confirm all `src/*.ts` files exist and use `.js` extensions in imports (NodeNext requirement).
+Expected: 5 tests PASS. If a TS import path error appears, confirm all `src/*.ts` files exist and use `.js` extensions in imports (NodeNext requirement).
 
 - [ ] **Step 10: Build shared to dist**
 
@@ -525,7 +616,8 @@ git commit -m "feat(shared): zod contract for api, sync protocol, ws messages"
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "nest build",
+    "postinstall": "prisma generate",
+    "build": "prisma generate && nest build",
     "dev": "nest start --watch",
     "start": "node dist/main.js",
     "test": "vitest run",
@@ -538,19 +630,36 @@ git commit -m "feat(shared): zod contract for api, sync protocol, ws messages"
     "@nestjs/platform-express": "^10.4.15",
     "@prisma/client": "^6.1.0",
     "@synchub/shared": "workspace:*",
+    "dotenv": "^16.4.7",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.9",
     "@nestjs/testing": "^10.4.15",
+    "@swc/core": "^1.10.4",
+    "@types/node": "^22.10.5",
+    "@types/supertest": "^6.0.2",
     "prisma": "^6.1.0",
     "supertest": "^7.0.0",
     "typescript": "^5.7.2",
+    "unplugin-swc": "^1.5.1",
     "vitest": "^2.1.8"
   }
 }
 ```
+
+**Why these additions (plan-review blockers):**
+- `@types/node` — `src/main.ts` uses `process`/`console`; without it `nest build`
+  fails under pnpm's strict isolation (B1).
+- `postinstall`/`build` run `prisma generate` — `@prisma/client` types don't exist
+  until generated, so a clean `pnpm build` would otherwise fail (B3).
+- `@swc/core` + `unplugin-swc` — Vitest's esbuild transform drops
+  `emitDecoratorMetadata`, so NestJS DI can't resolve `PrismaService` in tests; SWC
+  restores it (B5, wired in Step 11 below).
+- `dotenv` — loaded first in `main.ts` so `pnpm dev` reads `DATABASE_URL` from
+  `.env` and `PrismaService.$connect()` doesn't crash on boot (minor).
+- `@types/supertest` — types for the e2e test (M5).
 
 - [ ] **Step 2: Create `apps/hub-api/nest-cli.json`**
 
@@ -570,6 +679,7 @@ git commit -m "feat(shared): zod contract for api, sync protocol, ws messages"
     "module": "CommonJS",
     "target": "ES2022",
     "moduleResolution": "node",
+    "types": ["node"],
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "strict": true,
@@ -583,7 +693,7 @@ git commit -m "feat(shared): zod contract for api, sync protocol, ws messages"
 }
 ```
 
-Note: NestJS uses CommonJS + decorators, so this tsconfig intentionally does NOT extend the NodeNext base. It still imports `@synchub/shared` (an ESM package) via NestJS/Node interop.
+Note: NestJS uses CommonJS + decorators, so this tsconfig intentionally does NOT extend the NodeNext base. It imports `@synchub/shared` via the package's `require` (CJS) export condition (dual-built in Task 3), so there is **no `require(ESM)`** at runtime. `"types": ["node"]` makes `process`/`console` resolve.
 
 - [ ] **Step 4: Create `apps/hub-api/src/health/health.controller.ts`**
 
@@ -615,6 +725,7 @@ export class AppModule {}
 - [ ] **Step 6: Create `apps/hub-api/src/main.ts`**
 
 ```ts
+import "dotenv/config"; // load DATABASE_URL etc. from apps/hub-api/.env before Prisma
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module.js";
@@ -660,23 +771,52 @@ describe("GET /health", () => {
 });
 ```
 
-- [ ] **Step 8: Install deps**
+- [ ] **Step 8: Create `apps/hub-api/vitest.config.ts` (SWC → decorator metadata for DI)**
 
-Run:
-```bash
-pnpm --filter @synchub/hub-api install
+Vitest transforms TS with esbuild, which drops `emitDecoratorMetadata`. NestJS DI
+(introduced in Task 5) needs it, so use SWC and polyfill `reflect-metadata`:
+```ts
+import swc from "unplugin-swc";
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    globals: true,
+    environment: "node",
+    setupFiles: ["reflect-metadata", "dotenv/config"],
+    include: ["test/**/*.test.ts", "src/**/*.test.ts"],
+  },
+  plugins: [swc.vite({ module: { type: "es6" } })],
+});
 ```
-Expected: installs NestJS + Prisma + test deps.
 
-- [ ] **Step 9: Run the e2e test → PASS**
+- [ ] **Step 9: Install deps and build the shared package (required before tests)**
+
+Run (bash):
+```bash
+pnpm --filter @synchub/shared build && pnpm --filter @synchub/hub-api install
+```
+PowerShell:
+```powershell
+pnpm --filter @synchub/shared build; if ($?) { pnpm --filter @synchub/hub-api install }
+```
+Expected: shared `dist/` exists (so `@synchub/shared` resolves), then NestJS +
+Prisma + SWC + test deps install. `postinstall` runs `prisma generate` — this
+needs `prisma/schema.prisma`, which does not exist until Task 5. For now that is
+fine because `@prisma/client` is not imported yet (Task 4 has no Prisma code); if
+`postinstall` errors on the missing schema, ignore it until Task 5 Step 3 creates
+the schema, or temporarily comment out `postinstall` and restore it in Task 5.
+
+- [ ] **Step 10: Run the e2e test → PASS**
 
 Run:
 ```bash
 pnpm --filter @synchub/hub-api test
 ```
-Expected: 1 test PASS (validates via `@synchub/shared`). If module-resolution of the shared package fails, run `pnpm --filter @synchub/shared build` first (dist must exist).
+Expected: 1 test PASS (validates the response via `@synchub/shared`). This test has
+no DI yet, so it passes regardless; the SWC config matters from Task 5 onward.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add apps/hub-api pnpm-lock.yaml
@@ -722,6 +862,8 @@ model User {
   notifications      Notification[]
   events             Event[]
   pairingCodes       PairingCode[]
+
+  @@map("users")
 }
 
 model Session {
@@ -729,24 +871,31 @@ model Session {
   user_id    Int
   created_at DateTime @default(now())
   user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
 }
 
 model Machine {
-  id            Int       @id @default(autoincrement())
+  id            Int           @id @default(autoincrement())
   user_id       Int
   name          String
-  token         String    @unique
+  token         String        @unique
   os            String?
   os_version    String?
   label         String?
   agent_version String?
   last_ip       String?
-  status        String    @default("offline")
+  status        String        @default("offline")
   last_seen_at  DateTime?
-  created_at    DateTime  @default(now())
-  user          User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  created_at    DateTime      @default(now())
+  user          User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
   mappings      Mapping[]
   pairingCodes  PairingCode[]
+  fileStates    FileState[]
+  conflicts     Conflict[]
+  events        Event[]
+
+  @@map("machines")
 }
 
 model PairingCode {
@@ -757,6 +906,8 @@ model PairingCode {
   created_at DateTime @default(now())
   user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
   machine    Machine? @relation(fields: [machine_id], references: [id], onDelete: Cascade)
+
+  @@map("pairing_codes")
 }
 
 model Project {
@@ -769,8 +920,10 @@ model Project {
   mappings   Mapping[]
   fileStates FileState[]
   conflicts  Conflict[]
+  events     Event[]
 
   @@unique([user_id, alias])
+  @@map("projects")
 }
 
 model Mapping {
@@ -783,6 +936,8 @@ model Mapping {
   machine    Machine  @relation(fields: [machine_id], references: [id], onDelete: Cascade)
 
   @@unique([project_id, machine_id])
+  @@index([machine_id])
+  @@map("mappings")
 }
 
 model FileState {
@@ -794,9 +949,11 @@ model FileState {
   last_machine_id Int?
   updated_at      DateTime @default(now())
   project         Project  @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  machine         Machine? @relation(fields: [last_machine_id], references: [id], onDelete: SetNull)
 
   @@unique([project_id, filename])
   @@index([project_id])
+  @@map("file_state")
 }
 
 model Conflict {
@@ -810,8 +967,10 @@ model Conflict {
   created_at     DateTime  @default(now())
   resolved_at    DateTime?
   project        Project   @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  machine        Machine?  @relation(fields: [machine_id], references: [id], onDelete: SetNull)
 
   @@index([project_id, status])
+  @@map("conflicts")
 }
 
 model Notification {
@@ -823,6 +982,8 @@ model Notification {
   read       Int      @default(0)
   created_at DateTime @default(now())
   user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
 }
 
 model Event {
@@ -836,10 +997,22 @@ model Event {
   latency_ms Int?
   created_at DateTime @default(now())
   user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  machine    Machine? @relation(fields: [machine_id], references: [id], onDelete: SetNull)
+  project    Project? @relation(fields: [project_id], references: [id], onDelete: SetNull)
 
   @@index([user_id, created_at])
+  @@map("events")
 }
 ```
+
+**Fidelity notes (plan-review M1/M2):** `@@map(...)` on every model preserves the
+original snake_case table names (`users`, `file_state`, `pairing_codes`, …) — Prisma
+would otherwise create `User`, `FileState`, etc. The four `Int?` FKs that
+`schema.sql` declares `ON DELETE SET NULL` (`file_state.last_machine_id`,
+`conflicts.machine_id`, `events.machine_id`, `events.project_id`) are now real
+`@relation(..., onDelete: SetNull)` links with back-relations on `Machine`/`Project`
+— preserving referential integrity Phase 2 relies on. The `@@index([machine_id])`
+on `mappings` also fixes the missing hot-path index found in the audit (§7.4).
 
 - [ ] **Step 2: Create `apps/hub-api/.env` for the datasource**
 
@@ -850,11 +1023,15 @@ DATABASE_URL="file:./dev.db"
 
 - [ ] **Step 3: Generate the client and create the first migration**
 
-Run:
+Run (works from repo root; no `cd`):
 ```bash
-cd apps/hub-api && pnpm prisma migrate dev --name init && cd ../..
+pnpm --filter @synchub/hub-api exec prisma migrate dev --name init
 ```
-Expected: creates `apps/hub-api/prisma/migrations/*_init/migration.sql`, applies it to `dev.db`, and generates `@prisma/client`. Verify the migration SQL contains all 10 tables.
+Expected: creates `apps/hub-api/prisma/migrations/*_init/migration.sql`, applies it
+to `apps/hub-api/prisma/dev.db` (Prisma resolves `file:./dev.db` relative to the
+schema dir), and generates `@prisma/client`. Verify the migration SQL contains all
+10 tables with their original snake_case names (`users`, `file_state`,
+`pairing_codes`, …) and the four `ON DELETE SET NULL` foreign keys.
 
 - [ ] **Step 4: Create `apps/hub-api/src/prisma/prisma.service.ts`**
 
@@ -934,11 +1111,14 @@ Ensure `DATABASE_URL` is set when running tests (Step 9 sets it).
 
 - [ ] **Step 9: Run e2e test with the DB → PASS**
 
-Run:
+Run (no inline env var needed — `dotenv/config` in the vitest setup loads
+`apps/hub-api/.env`, whose `DATABASE_URL="file:./dev.db"` points at the DB created
+in Step 3):
 ```bash
-DATABASE_URL="file:./prisma/dev.db" pnpm --filter @synchub/hub-api test
+pnpm --filter @synchub/hub-api test
 ```
-Expected: 1 test PASS with `db: "up"`.
+Expected: 1 test PASS with `db: "up"`. (If it reports `db: "down"`, the migration
+in Step 3 did not run or `.env` is missing — re-run Step 3.)
 
 - [ ] **Step 10: Commit**
 
@@ -968,7 +1148,7 @@ git commit -m "feat(hub-api): prisma sqlite schema (1:1 from schema.sql) + db he
   "type": "module",
   "scripts": {
     "dev": "vite --port 5173",
-    "build": "tsc -b && vite build",
+    "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run"
   },
@@ -1256,12 +1436,21 @@ git commit -m "feat(hub-web): react+vite SPA skeleton, typed health via shared, 
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": { "@synchub/shared": "workspace:*" },
-  "devDependencies": { "tsx": "^4.19.2", "typescript": "^5.7.2", "vitest": "^2.1.8" }
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
 }
 ```
+
+**Why:** `src/cli.ts` uses `process.argv`/`console`, so `@types/node` is required
+or `tsc` build fails (B2). `--passWithNoTests` keeps root `pnpm test` (and CI) green
+even though the agent has no test files in Phase 1 (B4).
 
 - [ ] **Step 2: Create `apps/agent/tsconfig.json`**
 
@@ -1355,11 +1544,21 @@ jobs:
 
 - [ ] **Step 2: Run the full pipeline locally**
 
-Run:
+Prerequisite: Task 5 Step 3 already created `apps/hub-api/prisma/dev.db` and its
+migration; `apps/hub-api/.env` exists locally. Tests read the DB via `dotenv/config`
+(vitest setup), so no inline env var is needed.
+
+Run (bash):
 ```bash
-pnpm install && pnpm lint && pnpm build && DATABASE_URL="file:./apps/hub-api/prisma/dev.db" pnpm test
+pnpm install && pnpm lint && pnpm build && pnpm test
 ```
-Expected: lint clean, all packages build, all tests pass (shared: 3, hub-api: 1, hub-web: 1). Fix any failure before committing.
+PowerShell:
+```powershell
+pnpm install; if ($?) { pnpm lint }; if ($?) { pnpm build }; if ($?) { pnpm test }
+```
+Expected: lint clean, all packages build, all tests pass — **shared: 5, hub-api: 1,
+hub-web: 1** (agent: 0, passes via `--passWithNoTests`). Fix any failure before
+committing.
 
 - [ ] **Step 3: Verify the legacy app is untouched**
 
@@ -1380,8 +1579,26 @@ git commit -m "ci: lint + build + test the monorepo on push/PR"
 
 ## Self-Review Notes (author checklist — completed)
 
-- **Spec coverage:** §4.1 tooling → Tasks 1–2; §4.2 shared contract → Task 3; §4.3 NestJS + Prisma → Tasks 4–5; §4.4 React SPA → Task 6; §4.5 agent skeleton → Task 7; §5 testing/CI → Tasks 3/4/6 + Task 8; "old app untouched" → Task 8 Step 3. All Phase 1 deliverables mapped.
+- **Spec coverage:** §4.1 tooling → Tasks 1–2; §4.2 shared contract (incl. the full
+  §2.1 realtime WS union) → Task 3; §4.3 NestJS + Prisma → Tasks 4–5; §4.4 React SPA
+  → Task 6; §4.5 agent skeleton → Task 7; §5 testing/CI → Tasks 3/4/6 + Task 8;
+  "old app untouched" → Task 8 Step 3. All Phase 1 deliverables mapped.
+- **Realtime contract (spec §2.1):** `ws.ts` (Task 3 Step 4) now defines
+  `presence`, `sync-progress`, `sync-complete`, `conflict`, plus renamed
+  `sync-trigger` — frozen so Phases 2–3 build against it. Two round-trip tests added.
+- **Plan-review blockers fixed:** B1/B2 `@types/node` (hub-api, agent); B3 `prisma
+  generate` in build+postinstall; B4 agent `--passWithNoTests`; B5 vitest+SWC config
+  + `reflect-metadata` setup; B6 PowerShell command forms throughout. Majors: M1 SET
+  NULL relations, M2 `@@map`, M3 realtime WS types, M4 dual CJS+ESM `@synchub/shared`
+  (no `require(ESM)`), M5 `@types/supertest`. Minors: hub-web `tsc --noEmit`, single
+  `DATABASE_URL` resolution, `dotenv/config` for `pnpm dev`/tests.
 - **Placeholder scan:** every code step contains full file content; no TBD/TODO.
-- **Type consistency:** `HealthResponse` (shared) is produced by hub-api Task 4/5 and consumed by hub-web Task 6 and both tests; `PushResponse`/`WsMessage` defined in Task 3 and only referenced within Task 3's test. `@synchub/shared` package name consistent across all `package.json` deps.
-- **Known follow-ups (out of Phase 1 scope):** real auth/projects/machines endpoints (Phase 2), porting sync/merge/relay logic (Phase 2), full UI (Phase 3), agent watcher + binaries (Phase 4).
+- **Type consistency:** `HealthResponse` (shared) is produced by hub-api Task 4/5 and
+  consumed by hub-web Task 6 and both tests; `WsMessage`/`PushResponse` defined in
+  Task 3 and referenced in Task 3's tests. `@synchub/shared` package name consistent
+  across all `package.json` deps.
+- **Known follow-ups (out of Phase 1 scope):** the §7 audit backlog is addressed in
+  later phases — server realtime broadcasts + security + transactional push (Phase 2),
+  live UI + reconnect (Phase 3), agent crash-safety/deletes/queue/heartbeat/install
+  (Phase 4). Phase 1 only freezes the typed contract they build against.
 ```

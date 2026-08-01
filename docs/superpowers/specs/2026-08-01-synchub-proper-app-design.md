@@ -94,19 +94,72 @@ synchub/  (pnpm monorepo)
 - **Deployment stays simple.** Self-hoster: `docker compose up` (Hub) + agent
   binary via install script. No Postgres, no Redis.
 
+## 2.1 Realtime — a First-Class Requirement
+
+The app must feel **fully live**: nothing important should require a page refresh
+or a manual "Refresh" click. An audit of the current app found that realtime is
+largely **broken today** — presence is written to the DB but never pushed to the
+browser, the client's `changed` handler is dead code (the server only emits
+`changed` to agents, never to user sockets), there is no sync-progress messaging
+at all (the UI fabricates "100%"), normal syncs raise no notification, and the
+browser WebSocket never reconnects after a drop. See §7 for the full list.
+
+The rewrite makes these guarantees, driven end-to-end over WebSocket:
+
+1. **Live presence** — when a machine goes online/offline, every open browser for
+   that user updates the machine's status **without a refresh**.
+2. **Live sync progress** — while a machine syncs, the relevant project/dashboard
+   view shows real per-file progress (pushed/pulled counts), not a fake bar.
+3. **Sync-complete notification** — when a reconcile finishes, the user gets a
+   notification and the activity feed updates live. Conflicts surface live too.
+4. **Live activity/data** — project and dashboard data patch in on `changed`
+   events instead of polling or manual refresh.
+5. **Resilient transport** — server↔agent **and** server↔browser sockets use
+   app-level heartbeat (ping/pong + liveness timeout) so half-open connections are
+   detected; both the browser and the agent **reconnect with backoff** and
+   **re-reconcile on reconnect** so no event is silently missed.
+
+### Realtime contract (typed in `packages/shared` from Phase 1)
+
+The WebSocket message union is defined once and frozen early so later phases build
+against it. Browser-directed messages (new — do not exist today):
+
+- `presence` — `{ machineId, status: "online"|"offline", lastSeenAt }`
+- `sync-progress` — `{ projectId, machineId, filename?, completed, total, phase: "scan"|"push"|"pull" }`
+- `sync-complete` — `{ projectId, machineId?, at }`
+- `conflict` — `{ projectId, filename, conflictId }` (live conflict surfacing)
+- `changed` (browser-directed variant) — data invalidation for a project
+- `notification` — existing
+
+Agent-directed messages (retain today's semantics, renamed to avoid the collision
+between the server→agent `sync` **trigger** and the server→browser `sync-complete`):
+
+- `changed` (agent-directed) — pull this file
+- `sync-trigger` — manual-mode "sync now"
+- `welcome` — handshake
+
 ## 3. Delivery Plan — 4 Phases
 
 Each phase gets its own spec + implementation plan and keeps the app working. The
 old `hub/` and `agent/` directories stay **untouched** until the new equivalents
 are feature-complete, then are archived/deleted.
 
-1. **Phase 1 — Monorepo foundation** (detailed below; built first).
+1. **Phase 1 — Monorepo foundation** (detailed below; built first). Includes the
+   full realtime WS contract (§2.1) frozen in `packages/shared`.
 2. **Phase 2 — Backend:** NestJS + Prisma; port sync/merge/relay/conflict logic
-   into typed modules; WebSocket gateway; auth guards.
+   into typed modules; WebSocket gateway; auth guards. Fixes the server-side audit
+   findings (§7): broadcast presence/progress/complete to browsers, always-merge
+   (drop `base_hash` trust), session expiry, SSRF-guarded webhooks, rate limiting,
+   transactional push, WS heartbeat, store-file cleanup, versioned migrations.
 3. **Phase 3 — Frontend:** React + Vite SPA; app-shell + routes; persistent WS;
-   TanStack Query/Router. The nav-refresh pain is resolved here.
+   TanStack Query/Router. The nav-refresh pain is resolved here, and the live UI
+   (presence, progress, activity, reconnect) from §2.1 is implemented — replacing
+   today's dead `changed` handler, 10 s polling, and manual-refresh machines page.
 4. **Phase 4 — Agent:** TS conversion; single-binary releases; install script;
-   OS service registration.
+   OS service registration. Fixes the agent audit findings (§7): crash-safe atomic
+   state, delete/rename propagation, single serialized sync queue, WS heartbeat +
+   reconnect-triggered reconcile, incremental push for live sessions, token
+   refresh/re-pair, and a user-independent config path in the service units.
 
 ## 4. Phase 1 — Monorepo Foundation (first spec)
 
@@ -128,8 +181,10 @@ guesswork), covering:
   notifications, dashboard stats.
 - **Sync protocol** — `manifest`, `pull`, `push` request/response shapes (from
   `hub/src/routes/agent.js`).
-- **WebSocket messages** — `welcome`, `changed`, `sync`, `notification` (from
-  `hub/src/lib/realtime.js`).
+- **WebSocket messages** — the **full realtime contract** from §2.1 (not just
+  today's four): browser-directed `presence`, `sync-progress`, `sync-complete`,
+  `conflict`, `changed`, `notification`; agent-directed `changed`, `sync-trigger`,
+  `welcome`. Frozen here so Phases 2–3 build against a stable typed union.
 
 **4.3 `apps/hub-api` — NestJS skeleton**
 - `nest new` structure; `GET /health` endpoint; Prisma module wired.
@@ -197,3 +252,88 @@ lives in `apps/` + `packages/`. The old Hub is archived/deleted only once Phases
   a single-process self-host).
 - No delta-sync / protocol changes in this effort (full-file sync is retained;
   delta-sync is a possible future improvement, tracked separately).
+
+## 7. Existing-App Issues to Fix in the Rewrite
+
+A full audit of the current `hub/` and `agent/` code produced the list below. Each
+item names the phase that fixes it. Severity: **C**ritical / **H**igh / **M**edium
+/ **L**ow. This is the backlog the rewrite must clear, not just a re-skin.
+
+### 7.1 Realtime (mostly Phase 2 server + Phase 3 client)
+- **C** Presence never reaches the browser — `realtime.js` writes machine
+  `status` to the DB but has no broadcast to user sockets; machines page updates
+  only on manual "Refresh". → live `presence` broadcast.
+- **C** Client `changed` handler is dead — `notifyProjectChanged` emits only to
+  agents, never to user sockets, so dashboard/project views go stale. → emit
+  browser-directed `changed`; drop the 10 s poll.
+- **H** No sync progress/complete signalling — no progress events exist; the UI
+  fabricates "100%"; normal (non-conflict) syncs raise no notification. → real
+  `sync-progress`/`sync-complete` events + notification.
+- **M** No browser WS reconnect (`app-shell.js` opens once, no backoff) and no
+  server↔client/agent heartbeat → phantom-online machines, silent dead sockets.
+  → ping/pong + liveness timeout + reconnect-with-backoff on both ends.
+
+### 7.2 Security (Phase 2)
+- **H** Sessions never expire or rotate (no `expires_at`); token in `localStorage`.
+  → expiring/refreshable sessions, prune on logout.
+- **H** Webhook URL is an unauthenticated SSRF vector (`notify.js` fetches it
+  verbatim). → scheme/host validation, block private/link-local, no redirects.
+- **H** No rate limiting on login/signup/pairing-redeem; 6-char pairing codes with
+  unlimited attempts. → per-IP/account throttling, attempt caps, longer codes.
+- **H** `base_hash` is trusted for correctness — a lying/buggy agent can overwrite
+  canonical with no merge (silent data loss). → always `autoMerge` against stored
+  canonical; verify claimed base is a real prefix.
+- **L** Timing-unsafe secret lookups, case-sensitive email uniqueness, `http://`
+  hub URLs accepted, machine token in WS URL query string, plaintext token on disk
+  (chmod is a no-op on Windows). → constant-time compares, email normalization,
+  enforce HTTPS (non-localhost), token via upgrade header, OS keystore/DPAPI.
+
+### 7.3 Correctness & reliability (Phase 2 server / Phase 4 agent)
+- **C** (agent) Local deletions are resurrected — reconcile re-pulls any file the
+  hub still has; no delete propagation (`state.del` is dead code). → bidirectional
+  delete with tombstones + a hub soft-delete path.
+- **C** (agent) Corrupt/truncated state or config crash-loops the agent on boot
+  (unguarded `JSON.parse`, non-atomic writes). → try/catch + atomic temp-file rename.
+- **H** (agent) Overlapping reconciles — the 30 s timer has no reentrancy guard;
+  concurrent runs double-push and race the state file. → single serialized sync
+  queue.
+- **H** (agent) `awaitWriteFinish` + debounce stalls live-session sync — an active
+  transcript is never "stable", so nothing syncs until the session idles. →
+  incremental append-based push for live sessions.
+- **H** (agent) Non-JSON hub responses (413/502/HTML) throw and abort the whole
+  reconcile batch (`api.js` parses unconditionally). → guard parsing, per-file
+  try/catch, treat non-2xx distinctly.
+- **M** Push is non-atomic across filesystem + DB (no transaction); a crash between
+  `store.write` and `fileState.upsert` diverges content and hash. → wrap in a
+  transaction, DB as source of truth.
+- **M** Orphaned relay-store files never cleaned on project/machine/user delete;
+  unresolved conflict candidates never GC'd → unbounded disk growth. → cascade
+  store cleanup + candidate sweep.
+- **M** "Manual" sync mode still auto-pushes every 30 s (only `stopped` is
+  excluded). → gate pushes on `auto`; manual = pull/on-demand only.
+- **M** Watcher debounce-timer map grows unbounded (leak); pull-writes echo back
+  through the watcher causing redundant round-trips. → delete timers on fire;
+  short-lived write-suppression set.
+- **M** Local rename = duplicate (old resurrected + new pushed); `*.jsonl`
+  directory entries crash reconcile (`EISDIR`). → rename detection; `stat` guard.
+- **M** Unversioned migrations swallow **all** errors in `db.js`, not just
+  "duplicate column" → silent half-applied schema. → versioned migration table
+  (Prisma migrations, Phase 1).
+
+### 7.4 Data model & misc (Phase 1 schema / Phase 2)
+- **M** `last_ip` is shown in the UI but never written; no `trust proxy`. → capture
+  `req.ip` on touch/pair.
+- **L** Missing index on `mappings.machine_id` (hot path); candidate filename uses
+  a 12-hex hash prefix (collision risk); `auto_merge` fabricates+resolves a
+  conflict row just to log. → add index; full hash / conflict id; log via `events`.
+- **L** No global Express error handler; unguarded client JSON parse; `.html`
+  handler reads an arbitrary path from `req.path` without an allow-list. → error
+  middleware + consistent shape; guarded parse; static allow-list.
+
+### 7.5 Install & distribution (Phase 4)
+- **H** Not a single binary / real service — needs Node ≥22 + `npm install`
+  (native `node-notifier`, ~200 MB `electron` for the tray); service units hardcode
+  node paths, run as root but read the installing user's `~/.synchub`, and the
+  Windows "service" is a logon task (no Session-0). No auto-update. → SEA/pkg
+  single binary, user-independent config path (`--config`/env in the unit),
+  correct per-OS units, an update channel.
