@@ -12,6 +12,7 @@ import { NotificationsModule } from "./notifications/notifications.module.js";
 import { ConflictsModule } from "./conflicts/conflicts.module.js";
 import { DashboardModule } from "./dashboard/dashboard.module.js";
 import { RealtimeModule } from "./realtime/realtime.module.js";
+import { SyncModule } from "./sync/sync.module.js";
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { RealtimeModule } from "./realtime/realtime.module.js";
     NotificationsModule,
     ConflictsModule,
     DashboardModule,
+    SyncModule,
   ],
   controllers: [HealthController, LegacyHealthController],
 })
