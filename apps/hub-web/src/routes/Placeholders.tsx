@@ -1,7 +1,8 @@
 // Stub screens for sidebar destinations that later Phase 3 tasks flesh out
-// (3a-5 RealtimeProvider wires live machine/conflict state, 3a-6 the real
-// dashboard). They exist now so the persistent shell has real navigation
-// targets instead of dead links.
+// (3b/3c bring the real Projects/Machines/Conflicts/Notifications/Settings
+// screens). They exist now so the persistent shell has real navigation
+// targets instead of dead links. The Dashboard (3a-6) is the one screen
+// that's real already — see routes/Dashboard.tsx.
 function PlaceholderPage({ title, blurb }: { title: string; blurb: string }) {
   return (
     <div className="flex flex-col gap-2">
@@ -11,6 +12,15 @@ function PlaceholderPage({ title, blurb }: { title: string; blurb: string }) {
         Coming soon
       </div>
     </div>
+  );
+}
+
+export function Projects() {
+  return (
+    <PlaceholderPage
+      title="Projects"
+      blurb="Every synced project, its machines, and its sync mode — create, configure, and manage from here."
+    />
   );
 }
 

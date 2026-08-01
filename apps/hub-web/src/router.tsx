@@ -5,8 +5,8 @@ import {
   Outlet,
 } from "@tanstack/react-router";
 import { AppShell } from "./shell/AppShell.js";
-import { Dashboard, Projects } from "./routes/Dashboard.js";
-import { Machines, Conflicts, Notifications, Settings } from "./routes/Placeholders.js";
+import { Dashboard } from "./routes/Dashboard.js";
+import { Projects, Machines, Conflicts, Notifications, Settings } from "./routes/Placeholders.js";
 import { AuthGuard } from "./auth/AuthGuard.js";
 import { Login } from "./auth/Login.js";
 import { Signup } from "./auth/Signup.js";
