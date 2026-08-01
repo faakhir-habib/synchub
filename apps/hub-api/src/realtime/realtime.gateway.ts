@@ -54,7 +54,19 @@ export class RealtimeGateway implements OnModuleInit, OnModuleDestroy, RealtimeP
 
     this.wss = new WebSocketServer({ noServer: true });
     server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-      void this.handleUpgrade(req, socket, head);
+      // Defense in depth: handleUpgrade already wraps its body in try/catch,
+      // but this .catch() guards against an unexpected synchronous throw
+      // escaping before that try block runs. An unhandled rejection here
+      // would be a fatal uncaught exception under Node's default
+      // --unhandled-rejections=throw, killing the whole process — not just
+      // this one connection.
+      void this.handleUpgrade(req, socket, head).catch(() => {
+        try {
+          socket.destroy();
+        } catch {
+          // socket may already be destroyed/gone — nothing more to do.
+        }
+      });
     });
     this.startHeartbeat();
   }
@@ -65,41 +77,63 @@ export class RealtimeGateway implements OnModuleInit, OnModuleDestroy, RealtimeP
     this.wss?.close();
   }
 
+  // The whole body runs inside one try/catch: the awaited Prisma lookups below
+  // can throw (DB blip, timeout, connection-pool exhaustion), and this method
+  // is invoked as `void this.handleUpgrade(...)` from a plain event handler —
+  // an unhandled rejection there is a fatal uncaught exception under Node's
+  // default --unhandled-rejections=throw, which would crash the entire
+  // process (every live connection, not just this upgrade). A caught error
+  // here degrades to "reject this one connection attempt," matching the
+  // existing URL-parse-failure handling below.
   private async handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
-    let url: URL;
     try {
-      url = new URL(req.url ?? "/", "http://localhost");
-    } catch {
+      let url: URL;
+      try {
+        url = new URL(req.url ?? "/", "http://localhost");
+      } catch {
+        socket.destroy();
+        return;
+      }
+      const token = url.searchParams.get("token");
+
+      if (url.pathname === "/ws/agent") {
+        const machine = token ? await this.prisma.machine.findUnique({ where: { token } }) : null;
+        if (!machine) {
+          socket.destroy();
+          return;
+        }
+        // The client may have aborted the TCP socket while the Prisma lookup
+        // above was in flight — don't hand a destroyed socket to ws.
+        if (socket.destroyed) return;
+        this.wss!.handleUpgrade(req, socket, head, (ws) => {
+          void this.onAgent(ws as AliveWebSocket, machine);
+        });
+        return;
+      }
+
+      if (url.pathname === "/ws/user") {
+        const session = token
+          ? await this.prisma.session.findUnique({ where: { token }, include: { user: true } })
+          : null;
+        if (!session || !session.expires_at || session.expires_at <= new Date()) {
+          socket.destroy();
+          return;
+        }
+        if (socket.destroyed) return;
+        this.wss!.handleUpgrade(req, socket, head, (ws) =>
+          this.onUser(ws as AliveWebSocket, session.user),
+        );
+        return;
+      }
+
       socket.destroy();
-      return;
-    }
-    const token = url.searchParams.get("token");
-
-    if (url.pathname === "/ws/agent") {
-      const machine = token ? await this.prisma.machine.findUnique({ where: { token } }) : null;
-      if (!machine) {
+    } catch {
+      try {
         socket.destroy();
-        return;
+      } catch {
+        // socket may already be destroyed/gone — nothing more to do.
       }
-      this.wss!.handleUpgrade(req, socket, head, (ws) => {
-        void this.onAgent(ws as AliveWebSocket, machine);
-      });
-      return;
     }
-
-    if (url.pathname === "/ws/user") {
-      const session = token
-        ? await this.prisma.session.findUnique({ where: { token }, include: { user: true } })
-        : null;
-      if (!session || !session.expires_at || session.expires_at <= new Date()) {
-        socket.destroy();
-        return;
-      }
-      this.wss!.handleUpgrade(req, socket, head, (ws) => this.onUser(ws as AliveWebSocket, session.user));
-      return;
-    }
-
-    socket.destroy();
   }
 
   private add<K>(map: Map<K, Set<AliveWebSocket>>, key: K, ws: AliveWebSocket): void {

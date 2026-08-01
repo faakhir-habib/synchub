@@ -235,4 +235,44 @@ describe("RealtimeGateway", () => {
     await waitForCloseOrError(bad.ws);
     expect(openFired).toBe(false);
   });
+
+  it("rejects a /ws/user connection with an expired session token", async () => {
+    const { userId } = await signup();
+
+    // A real user, a real session row — just expired. Proves the WS upgrade
+    // path checks expiry (mirroring SessionAuthGuard), not merely "does a
+    // session with this token exist."
+    const expiredToken = `expired-${rand()}`;
+    await prisma.session.create({
+      data: {
+        token: expiredToken,
+        user_id: userId,
+        expires_at: new Date(Date.now() - 60_000),
+      },
+    });
+
+    const bad = connect(`ws://127.0.0.1:${port}/ws/user?token=${expiredToken}`);
+
+    let openFired = false;
+    bad.ws.once("open", () => {
+      openFired = true;
+    });
+
+    await waitForCloseOrError(bad.ws);
+    expect(openFired).toBe(false);
+  });
+
+  it("rejects a connection on an unknown WS path", async () => {
+    const { token } = await signup();
+
+    const bad = connect(`ws://127.0.0.1:${port}/ws/nope?token=${token}`);
+
+    let openFired = false;
+    bad.ws.once("open", () => {
+      openFired = true;
+    });
+
+    await waitForCloseOrError(bad.ws);
+    expect(openFired).toBe(false);
+  });
 });
