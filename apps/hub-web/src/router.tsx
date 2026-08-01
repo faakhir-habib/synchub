@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-router";
 import { AppShell } from "./shell/AppShell.js";
 import { Dashboard, Projects } from "./routes/Dashboard.js";
+import { Machines, Conflicts, Notifications, Settings } from "./routes/Placeholders.js";
 import { AuthGuard } from "./auth/AuthGuard.js";
 import { Login } from "./auth/Login.js";
 import { Signup } from "./auth/Signup.js";
@@ -36,6 +37,26 @@ const projectsRoute = createRoute({
   path: "/projects",
   component: Projects,
 });
+const machinesRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: "/machines",
+  component: Machines,
+});
+const conflictsRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: "/conflicts",
+  component: Conflicts,
+});
+const notificationsRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: "/notifications",
+  component: Notifications,
+});
+const settingsRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: "/settings",
+  component: Settings,
+});
 
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -49,7 +70,14 @@ const signupRoute = createRoute({
 });
 
 const routeTree = rootRoute.addChildren([
-  appLayoutRoute.addChildren([indexRoute, projectsRoute]),
+  appLayoutRoute.addChildren([
+    indexRoute,
+    projectsRoute,
+    machinesRoute,
+    conflictsRoute,
+    notificationsRoute,
+    settingsRoute,
+  ]),
   loginRoute,
   signupRoute,
 ]);
