@@ -98,6 +98,20 @@ export class ConflictsService {
       const size = Buffer.byteLength(candidateContent, "utf8");
 
       await this.prisma.$transaction(async (tx) => {
+        // Compare-and-swap: only proceed if the conflict is still "open" at
+        // commit time. This is the authoritative guard against a double-
+        // resolve race (two concurrent requests for the same conflict — the
+        // pre-transaction open-check above is only a fast-path optimization
+        // and is not itself atomic with the writes below). Run this FIRST so
+        // a losing request does the least work before rolling back.
+        const cas = await tx.conflict.updateMany({
+          where: { id: conflictId, status: "open" },
+          data: { status: "resolved", resolved_at: new Date() },
+        });
+        if (cas.count === 0) {
+          throw new NotFoundException({ error: "conflict not open", code: "conflict_not_open" });
+        }
+
         await tx.fileState.upsert({
           where: { project_id_filename: { project_id: projectId, filename } },
           create: {
@@ -123,10 +137,6 @@ export class ConflictsService {
             bytes: size,
           },
         });
-        await tx.conflict.update({
-          where: { id: conflictId },
-          data: { status: "resolved", resolved_at: new Date() },
-        });
       });
 
       this.realtime.notifyProjectChanged(projectId, { filename, hash: conflict.candidate_hash });
@@ -134,6 +144,15 @@ export class ConflictsService {
       // Canonical is kept as-is; only mark the conflict resolved and record
       // the audit event (no bytes — canonical content didn't change).
       await this.prisma.$transaction(async (tx) => {
+        // Same CAS guard as the candidate branch above.
+        const cas = await tx.conflict.updateMany({
+          where: { id: conflictId, status: "open" },
+          data: { status: "resolved", resolved_at: new Date() },
+        });
+        if (cas.count === 0) {
+          throw new NotFoundException({ error: "conflict not open", code: "conflict_not_open" });
+        }
+
         await tx.event.create({
           data: {
             user_id: userId,
@@ -141,10 +160,6 @@ export class ConflictsService {
             type: "conflict_resolved",
             filename,
           },
-        });
-        await tx.conflict.update({
-          where: { id: conflictId },
-          data: { status: "resolved", resolved_at: new Date() },
         });
       });
     }

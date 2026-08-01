@@ -296,6 +296,49 @@ describe("POST /api/projects/:id/conflicts/:conflictId/resolve", () => {
     expect(second.status).toBe(404);
   });
 
+  // Guards against the double-resolve race: two concurrent requests for the
+  // SAME open conflict must not both commit. The CAS inside the transaction
+  // (conflict.updateMany({where:{id, status:"open"}}) ) is what makes this
+  // deterministic under real concurrency — whichever request's transaction
+  // commits first flips status to "resolved" and the other's CAS necessarily
+  // sees 0 rows matched (Prisma/SQLite serializes the two interactive
+  // transactions), so it rolls back and 404s. Without the fix, both requests
+  // pass the pre-transaction open-check and both commit, doubling the
+  // conflict_resolved event/notification and racing on which choice "wins"
+  // canonical.
+  it("concurrent resolve requests for the same conflict: exactly one commits, the other 404s conflict_not_open", async () => {
+    const { token, userId, machine, project } = await setup();
+    const filename = "session.jsonl";
+    const { conflictId } = await seedConflict(
+      userId,
+      project.id,
+      machine.id,
+      filename,
+      '{"seq":1}\n',
+      '{"seq":1}\nbad\n',
+    );
+
+    const [a, b] = await Promise.all([
+      resolve(token, project.id, conflictId, { choice: "candidate" }),
+      resolve(token, project.id, conflictId, { choice: "canonical" }),
+    ]);
+
+    const statuses = [a.status, b.status].sort();
+    expect(statuses).toEqual([200, 404]);
+
+    const loser = a.status === 404 ? a : b;
+    expect(loser.body).toHaveProperty("error", "conflict not open");
+    expect(loser.body).toHaveProperty("code", "conflict_not_open");
+
+    const conflict = await prisma.conflict.findUnique({ where: { id: conflictId } });
+    expect(conflict!.status).toBe("resolved");
+
+    const events = await prisma.event.findMany({
+      where: { project_id: project.id, filename, type: "conflict_resolved" },
+    });
+    expect(events).toHaveLength(1);
+  });
+
   it("returns 404 when the conflictId does not belong to the given project", async () => {
     const { token, userId, machine, project: projectA } = await setup();
     const projectB = await createProject(token);
