@@ -171,6 +171,11 @@ export const Conflict = z.object({
 });
 export type Conflict = z.infer<typeof Conflict>;
 
+export const ResolveConflictRequest = z.object({
+  choice: z.enum(["candidate", "canonical"]).optional(),
+});
+export type ResolveConflictRequest = z.infer<typeof ResolveConflictRequest>;
+
 export const ProjectDetail = Project.extend({
   mappings: z.array(
     z.object({
