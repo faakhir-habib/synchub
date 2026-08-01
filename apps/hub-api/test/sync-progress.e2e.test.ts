@@ -106,10 +106,12 @@ function push(
 // construction time rather than after awaiting `open`: the server can emit
 // frames fast enough to race an `await` continuation that would otherwise
 // attach the "message" listener too late.
+type WsMessage = { type: string; [key: string]: unknown };
+
 interface TrackedSocket {
   ws: WebSocket;
-  nextMessage(timeoutMs?: number): Promise<any>;
-  nextMessageOfType(type: string, timeoutMs?: number): Promise<any>;
+  nextMessage(timeoutMs?: number): Promise<WsMessage>;
+  nextMessageOfType(type: string, timeoutMs?: number): Promise<WsMessage>;
   expectNoMessageOfType(type: string, timeoutMs?: number): Promise<void>;
 }
 
@@ -117,20 +119,20 @@ function connect(url: string): TrackedSocket {
   const ws = new WebSocket(url);
   openSockets.push(ws);
 
-  const queue: any[] = [];
-  const waiters: Array<(msg: any) => void> = [];
+  const queue: WsMessage[] = [];
+  const waiters: Array<(msg: WsMessage) => void> = [];
 
   ws.on("message", (data) => {
-    const msg = JSON.parse(data.toString());
+    const msg = JSON.parse(data.toString()) as WsMessage;
     const waiter = waiters.shift();
     if (waiter) waiter(msg);
     else queue.push(msg);
   });
 
-  function nextMessage(timeoutMs = 3000): Promise<any> {
-    if (queue.length) return Promise.resolve(queue.shift());
+  function nextMessage(timeoutMs = 3000): Promise<WsMessage> {
+    if (queue.length) return Promise.resolve(queue.shift() as WsMessage);
     return new Promise((resolve, reject) => {
-      const onMsg = (msg: any) => {
+      const onMsg = (msg: WsMessage) => {
         clearTimeout(timer);
         resolve(msg);
       };
@@ -143,7 +145,7 @@ function connect(url: string): TrackedSocket {
     });
   }
 
-  async function nextMessageOfType(type: string, timeoutMs = 3000): Promise<any> {
+  async function nextMessageOfType(type: string, timeoutMs = 3000): Promise<WsMessage> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       const remaining = deadline - Date.now();
@@ -162,7 +164,7 @@ function connect(url: string): TrackedSocket {
     for (;;) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) return;
-      let msg: any;
+      let msg: WsMessage;
       try {
         msg = await nextMessage(remaining);
       } catch {
@@ -252,7 +254,7 @@ describe("push -> live sync-progress/sync-complete to the pushing user's browser
       machineId: machine.id,
       at: expect.any(String),
     });
-    expect(new Date(complete.at).getTime()).toBeGreaterThanOrEqual(before);
+    expect(new Date(complete.at as string).getTime()).toBeGreaterThanOrEqual(before);
 
     void userId;
     user.ws.close();

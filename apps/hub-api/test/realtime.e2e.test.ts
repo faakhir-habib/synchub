@@ -46,30 +46,32 @@ async function createMachine(token: string): Promise<{ id: number; machineToken:
 // synchronous callback — before an `await waitForOpen(ws)` continuation gets
 // a chance to run and attach a listener. Queuing messages from the moment
 // the socket is created sidesteps that race entirely.
+type WsMessage = { type: string; [key: string]: unknown };
+
 interface TrackedSocket {
   ws: WebSocket;
-  nextMessage(timeoutMs?: number): Promise<any>;
-  nextMessageOfType(type: string, timeoutMs?: number): Promise<any>;
+  nextMessage(timeoutMs?: number): Promise<WsMessage>;
+  nextMessageOfType(type: string, timeoutMs?: number): Promise<WsMessage>;
 }
 
 function connect(url: string): TrackedSocket {
   const ws = new WebSocket(url);
   openSockets.push(ws);
 
-  const queue: any[] = [];
-  const waiters: Array<(msg: any) => void> = [];
+  const queue: WsMessage[] = [];
+  const waiters: Array<(msg: WsMessage) => void> = [];
 
   ws.on("message", (data) => {
-    const msg = JSON.parse(data.toString());
+    const msg = JSON.parse(data.toString()) as WsMessage;
     const waiter = waiters.shift();
     if (waiter) waiter(msg);
     else queue.push(msg);
   });
 
-  function nextMessage(timeoutMs = 3000): Promise<any> {
-    if (queue.length) return Promise.resolve(queue.shift());
+  function nextMessage(timeoutMs = 3000): Promise<WsMessage> {
+    if (queue.length) return Promise.resolve(queue.shift() as WsMessage);
     return new Promise((resolve, reject) => {
-      const onMsg = (msg: any) => {
+      const onMsg = (msg: WsMessage) => {
         clearTimeout(timer);
         resolve(msg);
       };
@@ -82,7 +84,7 @@ function connect(url: string): TrackedSocket {
     });
   }
 
-  async function nextMessageOfType(type: string, timeoutMs = 3000): Promise<any> {
+  async function nextMessageOfType(type: string, timeoutMs = 3000): Promise<WsMessage> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       const remaining = deadline - Date.now();
