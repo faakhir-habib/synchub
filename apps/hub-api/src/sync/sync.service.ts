@@ -224,6 +224,7 @@ export class SyncService {
       }
 
       this.realtime.notifyProjectChanged(projectId, { filename, hash, excludeMachineId: machine.id });
+      this.emitPushComplete(machine, projectId, filename);
       await this.touch(machine);
       return { status: "accepted", hash };
     }
@@ -300,6 +301,7 @@ export class SyncService {
         hash: finalHash,
         excludeMachineId: machine.id,
       });
+      this.emitPushComplete(machine, projectId, filename);
       await this.touch(machine);
       return { status: m.kind === "merged" ? "merged" : "accepted", hash: finalHash };
     }
@@ -343,6 +345,28 @@ export class SyncService {
     });
     await this.touch(machine);
     return { status: "conflict", conflictId };
+  }
+
+  // Live progress + completion for the pushing user's own browsers, fired
+  // AFTER the persisting transaction commits — single-file push, so it's
+  // always completed:1/total:1 (richer multi-file granularity is a Phase-4
+  // agent concern). Fire-and-forget: RealtimePort methods return void and
+  // the gateway swallows its own errors, so this can never turn an
+  // otherwise-successful push into a failure.
+  private emitPushComplete(machine: Machine, projectId: number, filename: string): void {
+    this.realtime.syncProgress(machine.user_id, {
+      projectId,
+      machineId: machine.id,
+      filename,
+      completed: 1,
+      total: 1,
+      phase: "push",
+    });
+    this.realtime.syncComplete(machine.user_id, {
+      projectId,
+      machineId: machine.id,
+      at: new Date().toISOString(),
+    });
   }
 
   // Notifications are best-effort: a canonical write or conflict row is
