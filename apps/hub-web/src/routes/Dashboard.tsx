@@ -2,11 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { getHealth } from "../lib/api.js";
 
 export function Dashboard() {
-  const { data, isLoading, isError } = useQuery({
+  const { data, isPending, isError } = useQuery({
     queryKey: ["health"],
     queryFn: getHealth,
   });
-  if (isLoading) return <p>Loading…</p>;
+  if (isPending) return <p>Loading…</p>;
   if (isError) return <p>hub-api unreachable</p>;
   return (
     <div>

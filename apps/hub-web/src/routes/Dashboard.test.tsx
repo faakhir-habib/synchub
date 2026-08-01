@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Dashboard } from "./Dashboard.js";
@@ -13,6 +13,8 @@ beforeEach(() => {
     })),
   );
 });
+
+afterEach(() => vi.unstubAllGlobals());
 
 function wrap(ui: React.ReactNode) {
   const qc = new QueryClient();
