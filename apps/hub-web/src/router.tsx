@@ -10,6 +10,7 @@ import { Machines, Conflicts, Notifications, Settings } from "./routes/Placehold
 import { AuthGuard } from "./auth/AuthGuard.js";
 import { Login } from "./auth/Login.js";
 import { Signup } from "./auth/Signup.js";
+import { RealtimeProvider } from "./realtime/realtime-provider.js";
 
 const rootRoute = createRootRoute({ component: () => <Outlet /> });
 
@@ -22,7 +23,9 @@ const appLayoutRoute = createRoute({
   id: "_app",
   component: () => (
     <AuthGuard>
-      <AppShell />
+      <RealtimeProvider>
+        <AppShell />
+      </RealtimeProvider>
     </AuthGuard>
   ),
 });
