@@ -39,6 +39,11 @@ export interface RealtimePort {
   syncComplete(userId: number, p: SyncCompletePayload): void;
   // Machine online/offline → the owning user's browsers.
   broadcastPresence(userId: number, p: PresencePayload): void;
+  // Arbitrary notification (e.g. webhook failure, conflict raised) → the owning user's browsers.
+  pushNotification(
+    userId: number,
+    notification: { type: string; title: string; body?: string | null },
+  ): void;
 }
 
 // No-op default. Phase 2c swaps this out for the real gateway.
@@ -48,4 +53,5 @@ export class NoopRealtime implements RealtimePort {
   syncProgress(): void {}
   syncComplete(): void {}
   broadcastPresence(): void {}
+  pushNotification(): void {}
 }
