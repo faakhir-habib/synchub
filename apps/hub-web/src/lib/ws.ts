@@ -29,6 +29,12 @@ export function openRealtimeSocket({
   const ws = new WebSocket(url);
   ws.onopen = onOpen;
   ws.onclose = onClose;
+  ws.onerror = () => {
+    // The browser gives us no detail on a WebSocket error event — this is
+    // purely for diagnosability in the console. The actual reconnect is
+    // driven by onclose (a close event always follows an error).
+    console.warn("[realtime] websocket error");
+  };
   ws.onmessage = (ev: MessageEvent) => {
     let raw: unknown;
     try {

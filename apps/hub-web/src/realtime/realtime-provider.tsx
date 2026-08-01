@@ -64,6 +64,13 @@ function dispatch(msg: WsMessage, queryClient: QueryClient): void {
     case "sync-trigger":
       // Agent/handshake-directed — nothing for the browser to act on.
       return;
+
+    default: {
+      // Exhaustiveness guard: if WsMessage gains a new variant, this fails
+      // to compile until a case is added above.
+      const _exhaustive: never = msg;
+      void _exhaustive;
+    }
   }
 }
 
@@ -106,7 +113,10 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
           // mounted rather than trying to reconcile individual messages.
           queryClient.invalidateQueries();
         },
-        onMessage: (msg) => dispatch(msg, queryClient),
+        onMessage: (msg) => {
+          if (tornDownRef.current) return;
+          dispatch(msg, queryClient);
+        },
         onClose: () => {
           if (tornDownRef.current) return;
           setStatus("reconnecting");
