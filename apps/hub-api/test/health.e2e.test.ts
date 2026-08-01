@@ -22,5 +22,6 @@ describe("GET /health", () => {
     const res = await request(app.getHttpServer()).get("/health").expect(200);
     const parsed = HealthResponse.parse(res.body);
     expect(parsed.status).toBe("ok");
+    expect(parsed.db).toBe("up");
   });
 });
