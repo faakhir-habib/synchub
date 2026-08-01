@@ -29,7 +29,7 @@ describe("presence-store", () => {
   });
 
   it("getSnapshot returns a NEW object identity after a mutation (required by useSyncExternalStore)", () => {
-    let captured: unknown[] = [];
+    const captured: unknown[] = [];
     function SnapshotCapture() {
       const all = useAllPresence();
       captured.push(all);
