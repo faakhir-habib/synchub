@@ -29,8 +29,7 @@ apps/hub-api/src/
 ├── common/
 │   ├── auth/          # SessionAuthGuard (Bearer), MachineAuthGuard (X-Machine-Token)
 │   ├── crypto/        # CryptoService: scrypt password hash/verify, sha256, tokens
-│   ├── errors/        # exception filter → { error, code } (typed in shared)
-│   └── ratelimit/     # throttler config (login/signup/pair-redeem)
+│   └── errors/        # exception filter → { error, code } (typed in shared)
 ├── users/             # signup/login/logout/me + profile + webhook (auth module)
 ├── machines/          # machines CRUD + pairing (create code / redeem)
 ├── projects/          # projects CRUD + mappings + sync-now + per-project conflicts
@@ -101,19 +100,15 @@ now inside a transaction, emitting the browser-facing `sync-complete`/`changed`.
 - **Webhook SSRF guard:** `NotifyService` validates the webhook URL — https/http
   scheme only, reject private/loopback/link-local IP ranges (resolve host, block
   RFC1918 + 169.254 + ::1 etc.), no redirects, a timeout.
-- **Rate limiting:** `@nestjs/throttler` on `login`, `signup`, and the
-  unauthenticated `pair/redeem`; per-IP + per-account caps; lock a pairing code
-  after N failed redeem attempts. Lengthen pairing codes (8 chars) — behind a
-  compatibility note since the legacy agent generates/echoes whatever the server
-  returns, so length is server-controlled and safe to change.
 - **Input validation:** every body validated via `zod` before handlers; consistent
   `{ error, code }` errors via a global exception filter (typed in shared).
 - **`last_ip` capture** (§7.4): set `req.ip` (with `trust proxy`) on machine touch
   / pair so the UI's IP column is real.
 - Constant-time token compares; email normalization (lowercase) on signup/login.
 
-Out of scope for Phase 2 (tracked, not done): moving tokens to httpOnly cookies,
-delta-sync, horizontal scaling.
+Out of scope for Phase 2 (tracked, not done): **rate limiting** (dropped per owner
+decision — no throttling on login/signup/pair-redeem), moving tokens to httpOnly
+cookies, delta-sync, horizontal scaling.
 
 ## 6. Realtime gateway (spec §2.1)
 
@@ -159,7 +154,7 @@ green and further along:
   `base_hash` and transactional-push fixes. Wired to a minimal realtime stub.
 - **Phase 2c — Realtime + hardening:** full `RealtimeGateway` (presence/progress/
   complete + heartbeat + reconnect-safe), `NotifyService` (WS + webhook + SSRF
-  guard), rate limiting, `last_ip`, final security pass.
+  guard), `last_ip`, final security pass.
 
 Each sub-phase: spec is this document's relevant section → its own bite-sized plan →
 subagent-driven execution with spec + code review per task.
