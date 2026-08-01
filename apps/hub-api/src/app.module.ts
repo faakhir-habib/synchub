@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { ScheduleModule } from "@nestjs/schedule";
 import { HealthController } from "./health/health.controller.js";
 import { LegacyHealthController } from "./health/legacy-health.controller.js";
 import { PrismaModule } from "./prisma/prisma.module.js";
@@ -13,6 +14,7 @@ import { DashboardModule } from "./dashboard/dashboard.module.js";
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
     UsersModule,

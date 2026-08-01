@@ -34,7 +34,11 @@ async function createMachine(token: string, name = "Machine"): Promise<number> {
   return res.body.id;
 }
 
-async function createProject(token: string, alias: string, sync_mode?: string): Promise<any> {
+async function createProject(
+  token: string,
+  alias: string,
+  sync_mode?: string,
+): Promise<Record<string, unknown>> {
   const res = await request(app.getHttpServer())
     .post("/api/projects")
     .set("Authorization", `Bearer ${token}`)
@@ -158,7 +162,7 @@ describe("GET /api/projects", () => {
       .set("Authorization", `Bearer ${a.token}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.map((p: any) => p.alias)).toEqual(["A1", "A2"]);
+    expect(res.body.map((p: { alias: string }) => p.alias)).toEqual(["A1", "A2"]);
   });
 });
 
