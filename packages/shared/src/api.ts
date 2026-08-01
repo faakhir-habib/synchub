@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { SyncMode, MachineStatus } from "./enums.js";
 
+// NOTE ON BOOLEAN FIELDS: SQLite has no native boolean, so the Prisma models
+// store these as `Int` (0/1): MeResponse.notify_conflicts, MeResponse.notify_sync,
+// Conflict.auto_merged, and NotificationsSummary.items[].read. These DTOs
+// intentionally expose real booleans — the hub-api layer MUST map Int → boolean
+// (e.g. `!!row.read`) when serializing, or a raw Prisma row will fail
+// `.parse()` here. Do NOT change these to `z.number()`; fix the mapping instead.
+
 export const ApiError = z.object({ error: z.string(), code: z.string().optional() });
 export type ApiError = z.infer<typeof ApiError>;
 

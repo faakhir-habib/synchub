@@ -14,6 +14,7 @@ model User {
   password_salt      String
   name               String?
   notify_webhook_url String?
+  // Int-as-boolean (SQLite has no bool). API must map Int->boolean; see @synchub/shared api.ts.
   notify_conflicts   Int            @default(1)
   notify_sync        Int            @default(1)
   created_at         DateTime       @default(now())
