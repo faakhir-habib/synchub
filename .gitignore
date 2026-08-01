@@ -27,3 +27,12 @@ out/
 # Agent optional electron
 /agent/electron/node_modules/
 /agent/electron/icon.png
+
+# monorepo
+node_modules/
+dist/
+apps/**/dist/
+packages/**/dist/
+apps/hub-web/dist/
+apps/hub-api/prisma/*.db
+.turbo/
