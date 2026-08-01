@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { SyncController } from "./sync.controller.js";
 import { SyncService } from "./sync.service.js";
 import { RelayStoreService } from "./relay-store.service.js";
+import { RelayGcService } from "./relay-gc.service.js";
 import { MergeService } from "./merge.service.js";
 import { AuthModule } from "../common/auth/auth.module.js";
 
@@ -11,7 +12,7 @@ import { AuthModule } from "../common/auth/auth.module.js";
 @Module({
   imports: [AuthModule],
   controllers: [SyncController],
-  providers: [SyncService, RelayStoreService, MergeService],
-  exports: [SyncService, RelayStoreService],
+  providers: [SyncService, RelayStoreService, MergeService, RelayGcService],
+  exports: [SyncService, RelayStoreService, RelayGcService],
 })
 export class SyncModule {}
