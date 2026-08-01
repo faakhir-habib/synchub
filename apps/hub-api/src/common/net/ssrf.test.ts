@@ -49,4 +49,40 @@ describe("assertPublicHttpUrl", () => {
   it("throws for a file: URL", async () => {
     await expect(assertPublicHttpUrl("file:///etc/passwd")).rejects.toThrow();
   });
+
+  it("fails closed when DNS resolution errors (mocked lookupFn rejects)", async () => {
+    const lookup: LookupFn = async () => {
+      throw new Error("ENOTFOUND");
+    };
+    await expect(assertPublicHttpUrl("http://does-not-resolve.example", lookup)).rejects.toThrow();
+  });
+
+  // Regression coverage for a verified SSRF bypass: WHATWG's URL serializer
+  // canonicalizes IPv4-mapped IPv6 literals to the HEX-hextet form
+  // (`::ffff:169.254.169.254` -> `::ffff:a9fe:a9fe`), never the dotted-decimal
+  // tail. A dotted-decimal-only regex for the "::ffff:a.b.c.d" shape silently
+  // never matches real browser/fetch-canonicalized input, so the embedded
+  // IPv4 must be recovered structurally from the expanded hextets, not by
+  // string-matching the textual form.
+  describe("IPv4-mapped / NAT64 IPv6 literal bypass regression", () => {
+    it("throws for the hex-canonicalized IPv4-mapped loopback ([::ffff:127.0.0.1] -> [::ffff:7f00:1])", async () => {
+      await expect(assertPublicHttpUrl("http://[::ffff:127.0.0.1]/")).rejects.toThrow();
+    });
+
+    it("throws for the hex-canonicalized IPv4-mapped cloud metadata address", async () => {
+      await expect(assertPublicHttpUrl("http://[::ffff:169.254.169.254]/")).rejects.toThrow();
+    });
+
+    it("throws for the hex-canonicalized IPv4-mapped RFC1918 address", async () => {
+      await expect(assertPublicHttpUrl("http://[::ffff:10.0.0.1]/")).rejects.toThrow();
+    });
+
+    it("resolves for an IPv4-mapped literal whose embedded address is genuinely public", async () => {
+      await expect(assertPublicHttpUrl("http://[::ffff:93.184.216.34]/")).resolves.toBeUndefined();
+    });
+
+    it("throws for a NAT64-embedded loopback address (64:ff9b::7f00:1 -> 127.0.0.1)", async () => {
+      await expect(assertPublicHttpUrl("http://[64:ff9b::7f00:1]/")).rejects.toThrow();
+    });
+  });
 });
