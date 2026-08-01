@@ -69,7 +69,7 @@ export const ProfileUpdateRequest = z.object({
 export type ProfileUpdateRequest = z.infer<typeof ProfileUpdateRequest>;
 
 export const WebhookUpdateRequest = z.object({
-  url: z.string().nullable(),
+  url: z.string().nullable().optional(),
 });
 export type WebhookUpdateRequest = z.infer<typeof WebhookUpdateRequest>;
 

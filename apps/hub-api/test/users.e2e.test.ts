@@ -220,6 +220,90 @@ describe("PUT /api/auth/me", () => {
     expect(me.body.name).toBe("n".repeat(120));
     expect(me.body.notify_conflicts).toBe(false);
   });
+
+  it("persists notify_webhook_url set and clear via PUT /me", async () => {
+    const email = `update-webhook-${rand()}@example.com`;
+    const signup = await request(app.getHttpServer())
+      .post("/api/auth/signup")
+      .send({ email, password: "password123" });
+    createdUserIds.push(signup.body.user.id);
+    const token = signup.body.token;
+
+    const set = await request(app.getHttpServer())
+      .put("/api/auth/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ notify_webhook_url: "https://example.com/hook" });
+    expect(set.status).toBe(200);
+    expect(set.body.notify_webhook_url).toBe("https://example.com/hook");
+
+    const meAfterSet = await request(app.getHttpServer())
+      .get("/api/auth/me")
+      .set("Authorization", `Bearer ${token}`);
+    expect(meAfterSet.body.notify_webhook_url).toBe("https://example.com/hook");
+
+    const clear = await request(app.getHttpServer())
+      .put("/api/auth/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ notify_webhook_url: null });
+    expect(clear.status).toBe(200);
+    expect(clear.body.notify_webhook_url).toBeNull();
+
+    const meAfterClear = await request(app.getHttpServer())
+      .get("/api/auth/me")
+      .set("Authorization", `Bearer ${token}`);
+    expect(meAfterClear.body.notify_webhook_url).toBeNull();
+  });
+
+  it("persists a notify_sync toggle", async () => {
+    const email = `update-sync-${rand()}@example.com`;
+    const signup = await request(app.getHttpServer())
+      .post("/api/auth/signup")
+      .send({ email, password: "password123" });
+    createdUserIds.push(signup.body.user.id);
+    const token = signup.body.token;
+
+    const res = await request(app.getHttpServer())
+      .put("/api/auth/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ notify_sync: false });
+    expect(res.status).toBe(200);
+    expect(res.body.notify_sync).toBe(false);
+
+    const me = await request(app.getHttpServer())
+      .get("/api/auth/me")
+      .set("Authorization", `Bearer ${token}`);
+    expect(me.body.notify_sync).toBe(false);
+  });
+
+  it("leaves a previously-set notify_webhook_url unchanged when a later PUT only sets name", async () => {
+    const email = `update-partial-${rand()}@example.com`;
+    const signup = await request(app.getHttpServer())
+      .post("/api/auth/signup")
+      .send({ email, password: "password123" });
+    createdUserIds.push(signup.body.user.id);
+    const token = signup.body.token;
+
+    const first = await request(app.getHttpServer())
+      .put("/api/auth/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ notify_webhook_url: "https://example.com/keep-me" });
+    expect(first.status).toBe(200);
+    expect(first.body.notify_webhook_url).toBe("https://example.com/keep-me");
+
+    const second = await request(app.getHttpServer())
+      .put("/api/auth/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "Just A Name Update" });
+    expect(second.status).toBe(200);
+    expect(second.body.name).toBe("Just A Name Update");
+    // Explicitly-set webhook from the earlier PUT must survive this partial update.
+    expect(second.body.notify_webhook_url).toBe("https://example.com/keep-me");
+
+    const me = await request(app.getHttpServer())
+      .get("/api/auth/me")
+      .set("Authorization", `Bearer ${token}`);
+    expect(me.body.notify_webhook_url).toBe("https://example.com/keep-me");
+  });
 });
 
 describe("PUT /api/auth/me/notify-webhook", () => {

@@ -89,7 +89,10 @@ export class UsersService {
     return this.publicUser(user);
   }
 
-  async setWebhook(userId: number, url: string | null): Promise<{ notify_webhook_url: string | null }> {
+  async setWebhook(
+    userId: number,
+    url: string | null | undefined,
+  ): Promise<{ notify_webhook_url: string | null }> {
     const user = await this.prisma.user.update({
       where: { id: userId },
       data: { notify_webhook_url: url ?? null },
