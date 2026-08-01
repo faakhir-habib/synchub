@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { HealthResponse, PushResponse, SignupRequest, WsMessage } from "../src/index.js";
+import {
+  DashboardMetrics,
+  HealthResponse,
+  ProjectCreateRequest,
+  PushResponse,
+  SignupRequest,
+  WsMessage,
+} from "../src/index.js";
 
 describe("shared schemas round-trip", () => {
   it("accepts a valid HealthResponse", () => {
@@ -56,5 +63,25 @@ describe("shared schemas round-trip", () => {
       at: "2026-08-01T00:00:00Z",
     });
     expect(msg.type).toBe("sync-complete");
+  });
+
+  it("accepts a valid DashboardMetrics", () => {
+    const ok = DashboardMetrics.parse({
+      projects: { total: 3, syncing: 1 },
+      machines: { total: 5, online: 2 },
+      openConflicts: 0,
+      eventsToday: 12,
+      dataTransferredBytes: 4096,
+      sessionsSyncedToday: 7,
+      syncSuccessRate: 0.98,
+      avgLatencyMs: 42,
+      unreadNotifications: 1,
+    });
+    expect(ok.projects.total).toBe(3);
+  });
+
+  it("rejects a ProjectCreateRequest missing alias", () => {
+    const r = ProjectCreateRequest.safeParse({});
+    expect(r.success).toBe(false);
   });
 });

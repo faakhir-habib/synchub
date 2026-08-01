@@ -29,10 +29,11 @@ model User {
 }
 
 model Session {
-  token      String   @id
+  token      String    @id
   user_id    Int
-  created_at DateTime @default(now())
-  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  created_at DateTime  @default(now())
+  expires_at DateTime?
+  user       User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@map("sessions")
 }
