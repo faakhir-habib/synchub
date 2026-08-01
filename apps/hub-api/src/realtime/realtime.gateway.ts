@@ -254,42 +254,75 @@ export class RealtimeGateway implements OnModuleInit, OnModuleDestroy, RealtimeP
     this.sendTo(this.usersByUser.get(userId), { type: "notification", notification });
   }
 
+  // Fire-and-forget per the RealtimePort contract (see realtime.port.ts): the
+  // interface method is `void`, but the work below needs Prisma. Delegate to
+  // an async helper that is itself try/catch-wrapped — a Prisma error here
+  // must degrade to "this fan-out didn't happen," not an unhandled rejection
+  // that crashes the whole process (same lesson as the upgrade guard above).
   notifyProjectChanged(
     projectId: number,
     p: { filename: string; hash: string; excludeMachineId?: number },
   ): void {
-    void this.doNotifyProjectChanged(projectId, p);
+    void this.fanOutChanged(projectId, p);
   }
 
-  private async doNotifyProjectChanged(
+  private async fanOutChanged(
     projectId: number,
     p: { filename: string; hash: string; excludeMachineId?: number },
   ): Promise<void> {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project) return;
+    try {
+      const project = await this.prisma.project.findUnique({ where: { id: projectId } });
+      if (!project) return;
 
-    // Auto-mode: tell every other mapped agent to pull the change (TODO Task2:
-    // reconcile against the fuller fan-out design — see hub/src/lib/realtime.js
-    // notifyProjectChanged for the legacy behavior this mirrors).
-    if (project.sync_mode === "auto") {
+      // Auto-mode only: tell every other mapped agent to pull the change.
+      // Manual-mode projects still notify the owning user's browsers below —
+      // they just don't push agents to sync automatically (mirrors legacy
+      // hub/src/lib/realtime.js notifyProjectChanged + the §7.1 browser fix).
+      if (project.sync_mode === "auto") {
+        const mappings = await this.prisma.mapping.findMany({ where: { project_id: projectId } });
+        for (const mapping of mappings) {
+          if (mapping.machine_id === p.excludeMachineId) continue;
+          this.sendTo(this.agentsByMachine.get(mapping.machine_id), {
+            type: "changed",
+            projectId,
+            filename: p.filename,
+            hash: p.hash,
+          });
+        }
+      }
+
+      // Owning user's browsers always hear about it, regardless of sync mode.
+      this.sendTo(this.usersByUser.get(project.user_id), {
+        type: "changed",
+        projectId,
+        filename: p.filename,
+        hash: p.hash,
+      });
+    } catch {
+      // DB blip or the project/mappings vanished mid-lookup — best-effort
+      // fan-out, never a fatal error for the caller that triggered it.
+    }
+  }
+
+  // Not part of RealtimePort — a broker extra used by the manual "sync now"
+  // route (Task 5) to nudge every mapped agent regardless of sync_mode
+  // (unlike notifyProjectChanged, which only auto-fans-out agents in "auto"
+  // mode). Same fire-and-forget + try/catch-wrapped-helper shape as above.
+  triggerSync(projectId: number): void {
+    void this.fanOutTrigger(projectId);
+  }
+
+  private async fanOutTrigger(projectId: number): Promise<void> {
+    try {
       const mappings = await this.prisma.mapping.findMany({ where: { project_id: projectId } });
       for (const mapping of mappings) {
-        if (mapping.machine_id === p.excludeMachineId) continue;
         this.sendTo(this.agentsByMachine.get(mapping.machine_id), {
-          type: "changed",
+          type: "sync-trigger",
           projectId,
-          filename: p.filename,
-          hash: p.hash,
         });
       }
+    } catch {
+      // DB blip or the project/mappings vanished mid-lookup — best-effort.
     }
-
-    // Owning user's browsers always hear about it, regardless of sync mode.
-    this.sendTo(this.usersByUser.get(project.user_id), {
-      type: "changed",
-      projectId,
-      filename: p.filename,
-      hash: p.hash,
-    });
   }
 }
