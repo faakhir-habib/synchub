@@ -6,9 +6,19 @@ import { AuthModule } from "./common/auth/auth.module.js";
 import { UsersModule } from "./users/users.module.js";
 import { MachinesModule } from "./machines/machines.module.js";
 import { ProjectsModule } from "./projects/projects.module.js";
+import { NotifyModule } from "./notify/notify.module.js";
+import { NotificationsModule } from "./notifications/notifications.module.js";
 
 @Module({
-  imports: [PrismaModule, AuthModule, UsersModule, MachinesModule, ProjectsModule],
+  imports: [
+    PrismaModule,
+    AuthModule,
+    UsersModule,
+    MachinesModule,
+    ProjectsModule,
+    NotifyModule,
+    NotificationsModule,
+  ],
   controllers: [HealthController, LegacyHealthController],
 })
 export class AppModule {}
