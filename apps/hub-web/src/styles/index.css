@@ -1,0 +1,116 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light theme — crisp cool-slate, same brand hue family as dark */
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    --primary: 262 83% 58%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 214 32% 91%;
+    --accent-foreground: 222 47% 11%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 161 94% 30%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 32 95% 44%;
+    --warning-foreground: 0 0% 100%;
+
+    --info: 200 98% 39%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 262 83% 58%;
+
+    --radius: 0.75rem;
+
+    --font-display: "Manrope", var(--font-sans);
+    --font-sans: "Plus Jakarta Sans", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+
+  .dark {
+    /* Dark theme — deep slate/indigo, the primary developer-tool surface */
+    --background: 218 63% 7%;
+    --foreground: 222 100% 98%;
+
+    --card: 216 56% 12%;
+    --card-foreground: 222 100% 98%;
+
+    --popover: 215 53% 15%;
+    --popover-foreground: 222 100% 98%;
+
+    --primary: 252 100% 68%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 215 51% 17%;
+    --secondary-foreground: 222 100% 98%;
+
+    --muted: 216 56% 12%;
+    --muted-foreground: 214 22% 65%;
+
+    --accent: 215 53% 15%;
+    --accent-foreground: 222 100% 98%;
+
+    --destructive: 354 100% 71%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 163 66% 50%;
+    --success-foreground: 222 47% 11%;
+
+    --warning: 36 87% 67%;
+    --warning-foreground: 222 47% 11%;
+
+    --info: 185 76% 52%;
+    --info-foreground: 222 47% 11%;
+
+    --border: 215 25% 20%;
+    --input: 215 25% 20%;
+    --ring: 252 100% 68%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  .dark body {
+    background-image:
+      radial-gradient(circle at 76% -12%, hsl(var(--primary) / 0.16), transparent 35%),
+      radial-gradient(circle at 12% 95%, hsl(var(--info) / 0.08), transparent 28%);
+    background-attachment: fixed;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+}
