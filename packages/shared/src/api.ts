@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SyncMode, MachineStatus } from "./enums.js";
 
 export const ApiError = z.object({ error: z.string(), code: z.string().optional() });
 export type ApiError = z.infer<typeof ApiError>;
@@ -35,7 +36,7 @@ export type MeResponse = z.infer<typeof MeResponse>;
 export const Project = z.object({
   id: z.number().int(),
   alias: z.string(),
-  sync_mode: z.enum(["auto", "manual", "stopped"]),
+  sync_mode: SyncMode,
   created_at: z.string(),
 });
 export type Project = z.infer<typeof Project>;
@@ -44,7 +45,7 @@ export const Machine = z.object({
   id: z.number().int(),
   name: z.string(),
   os: z.string().nullable(),
-  status: z.enum(["online", "offline"]),
+  status: MachineStatus,
   last_seen_at: z.string().nullable(),
 });
 export type Machine = z.infer<typeof Machine>;

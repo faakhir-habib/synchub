@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MachineStatus } from "./enums.js";
 
 // --- Handshake (both directions) ---
 export const WsWelcome = z.object({
@@ -25,7 +26,7 @@ export const WsSyncTrigger = z.object({
 export const WsPresence = z.object({
   type: z.literal("presence"),
   machineId: z.number().int(),
-  status: z.enum(["online", "offline"]),
+  status: MachineStatus,
   lastSeenAt: z.string().nullable(),
 });
 

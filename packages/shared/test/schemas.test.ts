@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { HealthResponse, PushResponse, WsMessage } from "../src/index.js";
+import { HealthResponse, PushResponse, SignupRequest, WsMessage } from "../src/index.js";
 
 describe("shared schemas round-trip", () => {
   it("accepts a valid HealthResponse", () => {
@@ -42,5 +42,19 @@ describe("shared schemas round-trip", () => {
       phase: "push",
     });
     expect(msg.type).toBe("sync-progress");
+  });
+
+  it("rejects an invalid SignupRequest email", () => {
+    const r = SignupRequest.safeParse({ email: "not-an-email", password: "12345678" });
+    expect(r.success).toBe(false);
+  });
+
+  it("discriminates a WsSyncComplete message", () => {
+    const msg = WsMessage.parse({
+      type: "sync-complete",
+      projectId: 1,
+      at: "2026-08-01T00:00:00Z",
+    });
+    expect(msg.type).toBe("sync-complete");
   });
 });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SyncMode } from "./enums.js";
 
 export const ManifestEntry = z.object({
   filename: z.string(),
@@ -14,6 +15,7 @@ export const PushRequest = z.object({
   base_hash: z.string().nullable().default(null),
 });
 export type PushRequest = z.infer<typeof PushRequest>;
+export type PushRequestInput = z.input<typeof PushRequest>;
 
 export const PushResponse = z.object({
   status: z.enum(["accepted", "unchanged", "merged", "behind", "conflict"]),
@@ -27,6 +29,6 @@ export const AgentMapping = z.object({
   machine_id: z.number().int(),
   local_path: z.string(),
   alias: z.string().nullable(),
-  sync_mode: z.enum(["auto", "manual", "stopped"]),
+  sync_mode: SyncMode,
 });
 export type AgentMapping = z.infer<typeof AgentMapping>;
