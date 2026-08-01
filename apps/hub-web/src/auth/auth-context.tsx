@@ -15,6 +15,7 @@ import {
   getMe,
 } from "../lib/endpoints.js";
 import { ApiError } from "../lib/api-error.js";
+import { setUnauthorizedHandler } from "../lib/unauthorized.js";
 
 /** localStorage key the bearer token is persisted under across reloads. */
 export const AUTH_TOKEN_STORAGE_KEY = "synchub_token";
@@ -45,6 +46,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // before we've had a chance to rehydrate the session (see router guard).
   const [isLoading, setIsLoading] = useState(true);
 
+  // Shared by logout() and the global 401 handler below — clears the token
+  // out of state, the api client, and localStorage. Doesn't touch the
+  // network; callers decide whether hitting the logout endpoint makes sense.
+  const clearSession = useCallback(() => {
+    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    setAuthToken(null);
+    setToken(null);
+    setUser(null);
+  }, []);
+
+  // Registers the app-wide "any request just got a 401" handler. api.ts's
+  // request() calls this the instant it sees a 401, from any query or
+  // mutation anywhere in the app, not just the initial rehydration below.
+  // Clearing session state here is idempotent (safe to call repeatedly, e.g.
+  // if two in-flight requests both 401), and deliberately does NOT call the
+  // logout endpoint — the session is already invalid server-side, so that
+  // call would just 401 again. Once `token` clears, AuthGuard's existing
+  // `!token` check redirects to /login on the next render.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      clearSession();
+    });
+    return () => setUnauthorizedHandler(null);
+  }, [clearSession]);
+
   useEffect(() => {
     // Guards against StrictMode's dev-mode double-invoke applying a result
     // (or scheduling a retry) after this effect instance has been torn down.
@@ -71,10 +97,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
           if (err instanceof ApiError && err.status === 401) {
             // Session is actually invalid — clear it, no point retrying.
-            window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-            setAuthToken(null);
-            setToken(null);
-            setUser(null);
+            // (api.ts's request() has already fired the global 401 handler,
+            // i.e. clearSession(), for this same error; calling it again
+            // here is a harmless no-op — see clearSession's idempotency note.)
+            clearSession();
             return;
           }
 
@@ -99,7 +125,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+    // clearSession is a stable (empty-deps) useCallback, so including it
+    // here doesn't change when this effect re-runs — it still only runs
+    // once on mount.
+  }, [clearSession]);
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await apiLogin({ email, password });
@@ -123,11 +152,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await apiLogout().catch(() => {
       // best-effort — clear local session state even if the network call fails
     });
-    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-    setAuthToken(null);
-    setToken(null);
-    setUser(null);
-  }, []);
+    clearSession();
+  }, [clearSession]);
 
   return (
     <AuthContext.Provider value={{ user, token, isLoading, login, signup, logout }}>

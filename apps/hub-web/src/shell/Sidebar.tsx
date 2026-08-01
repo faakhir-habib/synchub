@@ -9,7 +9,8 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PresenceDot } from "@/components/PresenceDot";
+import { PresenceDot, type PresenceDotProps } from "@/components/PresenceDot";
+import { useRealtimeStatus } from "@/realtime/realtime-provider";
 
 const NAV_ITEMS = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
@@ -26,7 +27,23 @@ interface SidebarProps {
   onClose: () => void;
 }
 
+// Maps the live WebSocket connection state (see RealtimeProvider) onto the
+// sidebar footer's dot + label. "connected" is a steady green pulse,
+// "reconnecting" an amber pulse (still trying, not dead), "idle" a static
+// muted dot (no session yet / intentionally not connected).
+const SYNC_STATUS_DISPLAY: Record<
+  ReturnType<typeof useRealtimeStatus>,
+  Pick<PresenceDotProps, "online" | "pulse" | "tone"> & { label: string }
+> = {
+  connected: { online: true, pulse: true, tone: "success", label: "Operational" },
+  reconnecting: { online: true, pulse: true, tone: "warning", label: "Reconnecting…" },
+  idle: { online: false, pulse: false, label: "Offline" },
+};
+
 export function Sidebar({ open, onClose }: SidebarProps) {
+  const realtimeStatus = useRealtimeStatus();
+  const { online, pulse, tone, label } = SYNC_STATUS_DISPLAY[realtimeStatus];
+
   return (
     <>
       {/* Scrim behind the off-canvas sidebar on mobile. */}
@@ -81,12 +98,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
         <div className="shrink-0 border-t border-border px-5 py-4">
           <div className="flex items-center gap-2">
-            <PresenceDot online pulse />
+            <PresenceDot online={online} pulse={pulse} tone={tone} />
             <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
               Sync service
             </span>
           </div>
-          <p className="mt-1 pl-4 text-xs font-medium text-foreground/80">Operational</p>
+          <p className="mt-1 pl-4 text-xs font-medium text-foreground/80">{label}</p>
         </div>
       </aside>
     </>

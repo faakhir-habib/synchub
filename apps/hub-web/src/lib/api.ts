@@ -1,6 +1,7 @@
 import type { ZodType } from "zod";
 import { HealthResponse } from "@synchub/shared";
 import { ApiError } from "./api-error.js";
+import { notifyUnauthorized } from "./unauthorized.js";
 
 let authToken: string | null = null;
 
@@ -39,6 +40,12 @@ async function request<T>(method: Method, path: string, opts?: RequestOpts<T>): 
     } catch {
       // response had no (or non-JSON) body — fall back below
     }
+    if (res.status === 401) {
+      // Any 401 from any query/mutation means the session is no longer
+      // valid — clear it globally, not just on the initial rehydration.
+      notifyUnauthorized();
+    }
+
     throw new ApiError(res.status, body.code ?? `http_${res.status}`, body.error ?? res.statusText);
   }
 
