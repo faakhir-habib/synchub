@@ -4,7 +4,7 @@ import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { json } from "express";
 import { randomBytes } from "node:crypto";
-import { rmSync } from "node:fs";
+import { rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AppModule } from "../src/app.module.js";
@@ -28,6 +28,17 @@ let relayGc: RelayGcService;
 
 function rand(): string {
   return randomBytes(8).toString("hex");
+}
+
+// gcOrphans skips orphan candidates written within its mtime grace window
+// (they may be in-flight writes whose DB row hasn't committed yet — see
+// relay-store.service.ts). To exercise actual reclamation in these tests,
+// backdate a blob's mtime well outside any reasonable grace window, mirroring
+// relay-store.service.test.ts's approach for the unit-level GC tests.
+function backdateBlob(userId: number, hash: string): void {
+  const past = new Date(2020, 0, 1);
+  const blobPath = join(TEST_DIR, String(userId), "blobs", hash);
+  utimesSync(blobPath, past, past);
 }
 
 const createdUserIds: number[] = [];
@@ -110,8 +121,12 @@ describe("RelayGcService.gcUser", () => {
       },
     });
 
-    // H3: referenced by nothing — an orphan.
+    // H3: referenced by nothing — an orphan. Backdated so it falls outside
+    // gcOrphans's mtime grace window and is actually eligible for reclamation
+    // in this test (a freshly-written orphan is intentionally skipped — see
+    // relay-store.service.test.ts's grace-window tests).
     const h3 = relayStore.writeBlob(userId, `orphan-${rand()}`);
+    backdateBlob(userId, h3);
 
     expect(relayStore.hasBlob(userId, h1)).toBe(true);
     expect(relayStore.hasBlob(userId, h2)).toBe(true);
@@ -125,11 +140,13 @@ describe("RelayGcService.gcUser", () => {
     expect(relayStore.hasBlob(userId, h3)).toBe(false);
 
     // Resolving the conflict frees its candidate: h2 becomes reclaimable,
-    // h1 (still referenced by file_state) must survive.
+    // h1 (still referenced by file_state) must survive. Backdate h2 too, for
+    // the same grace-window reason as h3 above.
     await prisma.conflict.update({
       where: { id: conflict.id },
       data: { status: "resolved", resolved_at: new Date() },
     });
+    backdateBlob(userId, h2);
 
     const reclaimedAfterResolve = await relayGc.gcUser(userId);
 

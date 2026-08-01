@@ -10,6 +10,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -163,14 +164,38 @@ export class RelayStoreService {
    * Delete every stored blob for `userId` whose hash is not in `referenced`
    * (e.g. not pointed at by any file_state.hash / conflict.candidate_hash
    * row). Returns the number of blobs deleted.
+   *
+   * Blobs are written BEFORE the DB row that references them commits (that
+   * ordering is what makes writeBlob's crash-safety guarantee possible — see
+   * the file header). That leaves a window, between "blob written" and "DB
+   * row committed", during which a blob is genuinely unreferenced yet is
+   * about to become referenced any moment. A GC sweep that runs in that
+   * window would delete it out from under the still-in-flight write,
+   * leaving the DB row that commits a moment later pointing at nothing.
+   *
+   * `graceMs` guards that window: any orphan candidate whose file mtime is
+   * more recent than `graceMs` is skipped this sweep (it may still be
+   * in-flight) and picked up by a later sweep once it's actually stale.
    */
-  gcOrphans(userId: number, referenced: Set<string>): number {
+  gcOrphans(userId: number, referenced: Set<string>, graceMs = 5 * 60 * 1000): number {
+    const now = Date.now();
     let deleted = 0;
     for (const hash of this.listBlobHashes(userId)) {
-      if (!referenced.has(hash)) {
-        this.removeBlob(userId, hash);
-        deleted++;
+      if (referenced.has(hash)) continue;
+
+      const p = this.blobPath(userId, hash);
+      try {
+        const stat = statSync(p);
+        if (now - stat.mtimeMs < graceMs) continue; // possibly in-flight; skip this sweep
+      } catch (err) {
+        // Vanished between listBlobHashes and stat (e.g. a concurrent GC
+        // pass, or the write's own tmp-file cleanup): nothing to delete.
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw err;
       }
+
+      this.removeBlob(userId, hash);
+      deleted++;
     }
     return deleted;
   }

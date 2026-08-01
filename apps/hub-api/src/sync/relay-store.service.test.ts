@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -94,12 +94,46 @@ describe("RelayStoreService", () => {
     const drop1 = svc.writeBlob(gcUserId, '{"t":"drop1"}\n');
     const drop2 = svc.writeBlob(gcUserId, '{"t":"drop2"}\n');
 
-    const deleted = svc.gcOrphans(gcUserId, new Set([keep]));
+    // graceMs: 0 — this test is exercising the referenced/unreferenced
+    // split, not the mtime grace window (covered separately below), and the
+    // blobs above were just written so they'd otherwise fall inside the
+    // default 5-minute grace and survive regardless of being unreferenced.
+    const deleted = svc.gcOrphans(gcUserId, new Set([keep]), 0);
 
     expect(deleted).toBe(2);
     expect(svc.hasBlob(gcUserId, keep)).toBe(true);
     expect(svc.hasBlob(gcUserId, drop1)).toBe(false);
     expect(svc.hasBlob(gcUserId, drop2)).toBe(false);
+  });
+
+  it("gcOrphans skips a freshly-written orphan blob (within the mtime grace window): it survives and is excluded from the deleted count", () => {
+    const gcUserId = 4;
+    // Written just now, unreferenced, but a blob is written BEFORE the DB
+    // row pointing at it commits — a fresh orphan may just be an in-flight
+    // write whose commit hasn't landed yet, so GC must not touch it within
+    // the grace window.
+    const freshOrphan = svc.writeBlob(gcUserId, '{"t":"fresh-orphan"}\n');
+
+    const deleted = svc.gcOrphans(gcUserId, new Set(), 5 * 60 * 1000);
+
+    expect(deleted).toBe(0);
+    expect(svc.hasBlob(gcUserId, freshOrphan)).toBe(true);
+  });
+
+  it("gcOrphans reclaims an orphan blob once its mtime is older than the grace window", () => {
+    const gcUserId = 5;
+    const staleOrphan = svc.writeBlob(gcUserId, '{"t":"stale-orphan"}\n');
+
+    // Backdate the blob's mtime to well outside any reasonable grace window,
+    // simulating a write whose DB row commit definitely isn't still in flight.
+    const past = new Date(2020, 0, 1);
+    const blobPath = join(TEST_DIR, String(gcUserId), "blobs", staleOrphan);
+    utimesSync(blobPath, past, past);
+
+    const deleted = svc.gcOrphans(gcUserId, new Set(), 5 * 60 * 1000);
+
+    expect(deleted).toBe(1);
+    expect(svc.hasBlob(gcUserId, staleOrphan)).toBe(false);
   });
 
   it("content integrity: returned hash matches an independently computed sha-256", () => {
