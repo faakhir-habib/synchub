@@ -64,8 +64,13 @@ describe("POST /api/machines", () => {
     });
     expect(res.body.token).toEqual(expect.any(String));
     expect(res.body.id).toEqual(expect.any(Number));
-    // last_ip should be present as a key (may be null under supertest's fake IP handling).
-    expect(res.body).toHaveProperty("last_ip");
+    // With `trust proxy` set (as in beforeAll below), supertest's loopback
+    // connection gives req.ip a concrete value (typically ::1 or 127.0.0.1) —
+    // assert non-null rather than a specific address, which can vary by env.
+    expect(res.body.last_ip).not.toBeNull();
+
+    const machine = await prisma.machine.findUnique({ where: { id: res.body.id } });
+    expect(machine!.last_ip).not.toBeNull();
   });
 
   it("returns 400 when name is missing", async () => {
@@ -242,6 +247,8 @@ describe("POST /api/agent/pair/redeem", () => {
     expect(machine!.user_id).toBe(userId);
     expect(machine!.name).toBe("Paired Machine");
     expect(machine!.token).toBe(redeem.body.machineToken);
+    // last_ip should be wired on the pair-redeem path too (see Task 5 item 4).
+    expect(machine!.last_ip).not.toBeNull();
   });
 
   it("defaults the name to 'New machine' when not given", async () => {
@@ -284,6 +291,35 @@ describe("POST /api/agent/pair/redeem", () => {
       .post("/api/agent/pair/redeem")
       .send({ code });
     expect(second.status).toBe(400);
+  });
+
+  it("concurrent redeems of the SAME valid code: exactly one 201, one 400, only one machine created", async () => {
+    const { token, userId } = await signup();
+    const pair = await request(app.getHttpServer())
+      .post("/api/machines/pair")
+      .set("Authorization", `Bearer ${token}`);
+    const code = pair.body.code;
+
+    const [first, second] = await Promise.all([
+      request(app.getHttpServer()).post("/api/agent/pair/redeem").send({ code, name: "Racer A" }),
+      request(app.getHttpServer()).post("/api/agent/pair/redeem").send({ code, name: "Racer B" }),
+    ]);
+
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([201, 400]);
+
+    const winner = first.status === 201 ? first : second;
+    const loser = first.status === 201 ? second : first;
+    expect(winner.body.machineToken).toEqual(expect.any(String));
+    expect(winner.body.machineId).toEqual(expect.any(Number));
+    expect(loser.body).toHaveProperty("error");
+
+    const machines = await prisma.machine.findMany({ where: { user_id: userId } });
+    expect(machines.length).toBe(1);
+    expect(machines[0].id).toBe(winner.body.machineId);
+
+    const pairingCode = await prisma.pairingCode.findUnique({ where: { code } });
+    expect(pairingCode!.machine_id).toBe(winner.body.machineId);
   });
 
   it("returns 400 for an expired code", async () => {

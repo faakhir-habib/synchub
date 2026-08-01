@@ -38,6 +38,7 @@ beforeEach(() => {
     syncComplete: vi.fn(),
     broadcastPresence: vi.fn(),
     pushNotification: vi.fn(),
+    triggerSync: vi.fn(),
   };
   notify = new NotifyService(prisma, realtime);
 });

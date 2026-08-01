@@ -132,6 +132,14 @@ model Conflict {
   project        Project   @relation(fields: [project_id], references: [id], onDelete: Cascade)
   machine        Machine?  @relation(fields: [machine_id], references: [id], onDelete: SetNull)
 
+  // NOTE: migration 20260801205430_uniq_open_conflict additionally creates a
+  // hand-written PARTIAL unique index that Prisma's schema language cannot
+  // express and which is therefore NOT declared below:
+  //   CREATE UNIQUE INDEX "uniq_open_conflict" ON "conflicts"("project_id", "filename") WHERE "status" = 'open';
+  // It enforces at most one OPEN conflict per (project_id, filename). The
+  // migration file is the source of truth for this constraint — do not let
+  // a future `prisma migrate dev`/`migrate diff` drop it by "fixing" a
+  // perceived schema drift.
   @@index([project_id, status])
   @@map("conflicts")
 }

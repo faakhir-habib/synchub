@@ -44,6 +44,10 @@ export interface RealtimePort {
     userId: number,
     notification: { type: string; title: string; body?: string | null },
   ): void;
+  // Manual-mode "Sync now": nudge every agent mapped into this project to
+  // reconcile, regardless of the project's sync_mode (unlike
+  // notifyProjectChanged, which only auto-fans-out agents in "auto" mode).
+  triggerSync(projectId: number): void;
 }
 
 // No-op default. Phase 2c swaps this out for the real gateway.
@@ -54,4 +58,5 @@ export class NoopRealtime implements RealtimePort {
   syncComplete(): void {}
   broadcastPresence(): void {}
   pushNotification(): void {}
+  triggerSync(): void {}
 }

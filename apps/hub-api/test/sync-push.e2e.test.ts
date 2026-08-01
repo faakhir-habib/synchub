@@ -310,6 +310,49 @@ describe("POST /api/agent/push/:projectId", () => {
     expect(notification).not.toBeNull();
   });
 
+  it("one-open-conflict-per-file guard: two concurrent conflict-producing pushes to the SAME file only ever open ONE conflict row, and both responses 409 with a conflictId", async () => {
+    const { userId, machine, project } = await setup();
+    const filename = "session.jsonl";
+
+    const line1 = '{"seq":1,"timestamp":100}';
+    const line2 = '{"seq":2,"timestamp":200}';
+    const lineA3 = '{"seq":3,"timestamp":300,"from":"a"}';
+
+    const canonicalContent = `${line1}\n${line2}\n${lineA3}\n`;
+    const canonicalHash = relayStore.writeBlob(userId, canonicalContent);
+    await prisma.fileState.create({
+      data: {
+        project_id: project.id,
+        filename,
+        hash: canonicalHash,
+        size: Buffer.byteLength(canonicalContent, "utf8"),
+      },
+    });
+
+    // Two different invalid (unmergeable) tails, both diverging from canonical.
+    const contentX = `${line1}\n${line2}\nnot-valid-json-x\n`;
+    const contentY = `${line1}\n${line2}\nnot-valid-json-y\n`;
+
+    const [resX, resY] = await Promise.all([
+      push(machine.machineToken, project.id, { filename, content: contentX, base_hash: null }),
+      push(machine.machineToken, project.id, { filename, content: contentY, base_hash: null }),
+    ]);
+
+    expect(resX.status).toBe(409);
+    expect(resY.status).toBe(409);
+    expect(resX.body.status).toBe("conflict");
+    expect(resY.body.status).toBe("conflict");
+    expect(typeof resX.body.conflictId).toBe("number");
+    expect(typeof resY.body.conflictId).toBe("number");
+    // Both pushes must resolve to the SAME open conflict row.
+    expect(resX.body.conflictId).toBe(resY.body.conflictId);
+
+    const openConflicts = await prisma.conflict.count({
+      where: { project_id: project.id, filename, status: "open" },
+    });
+    expect(openConflicts).toBe(1);
+  });
+
   it("base_hash is advisory-only: a lying base_hash cannot overwrite canonical (data-loss guard)", async () => {
     const { userId, machine, project } = await setup();
     const filename = "session.jsonl";

@@ -1,6 +1,14 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import type { Project as PrismaProject } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { REALTIME_PORT } from "../realtime/realtime.port.js";
+import type { RealtimePort } from "../realtime/realtime.port.js";
 import type {
   Conflict,
   Project,
@@ -13,10 +21,13 @@ import type {
 const PRISMA_UNIQUE_CONSTRAINT = "P2002";
 
 // Ports legacy hub/src/routes/projects.js + hub/src/models/{projects,mappings,fileState,events,conflicts}.js.
-// Excludes sync-now (Phase 2c, needs realtime) and conflict resolution (Phase 2b, needs relay store).
+// Excludes conflict resolution (Phase 2b, needs relay store — see ConflictsService).
 @Injectable()
 export class ProjectsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(REALTIME_PORT) private readonly realtime: RealtimePort,
+  ) {}
 
   async listForUser(userId: number): Promise<Project[]> {
     const projects = await this.prisma.project.findMany({
@@ -175,6 +186,20 @@ export class ProjectsService {
       throw new NotFoundException({ error: "mapping not found" });
     }
     return { ok: true };
+  }
+
+  // Manual-mode "Sync now": records an audit event and nudges every mapped
+  // agent to reconcile this project, regardless of sync_mode. Ports legacy
+  // hub/src/routes/projects.js's `POST /:id/sync-now` handler.
+  async syncNow(userId: number, id: number): Promise<{ status: "triggered" }> {
+    const project = await this.findOwnedOrThrow(userId, id);
+
+    await this.prisma.event.create({
+      data: { user_id: userId, project_id: project.id, type: "sync_now" },
+    });
+    this.realtime.triggerSync(project.id);
+
+    return { status: "triggered" };
   }
 
   async listOpenConflicts(userId: number, projectId: number): Promise<Conflict[]> {

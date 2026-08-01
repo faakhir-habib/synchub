@@ -25,10 +25,9 @@ import {
 } from "@synchub/shared";
 
 // Ports legacy hub/src/routes/projects.js, mounted at /api/projects (global
-// "api" prefix). All routes require a session. sync-now is deferred
-// (Phase 2c, needs realtime triggerSync) and intentionally not implemented
-// here. Conflict resolution (Phase 2b) delegates to ConflictsService, which
-// owns the actual resolve logic.
+// "api" prefix). All routes require a session. Conflict resolution
+// (Phase 2b) delegates to ConflictsService, which owns the actual resolve
+// logic.
 @Controller("projects")
 @UseGuards(SessionAuthGuard)
 export class ProjectsController {
@@ -96,6 +95,12 @@ export class ProjectsController {
     @Param("machineId", ParseIntPipe) machineId: number,
   ) {
     return this.projects.removeMapping(user.id, id, machineId);
+  }
+
+  @Post(":id/sync-now")
+  @HttpCode(200)
+  syncNow(@CurrentUser() user: User, @Param("id", ParseIntPipe) id: number) {
+    return this.projects.syncNow(user.id, id);
   }
 
   @Get(":id/conflicts")

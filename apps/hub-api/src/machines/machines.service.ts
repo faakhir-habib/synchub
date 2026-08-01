@@ -82,6 +82,16 @@ export class MachinesService {
 
   // Redeems a valid, unexpired, unconsumed code -> creates a machine under the
   // code's owner, then consumes the code so it can't be redeemed again.
+  //
+  // Concurrency: the findFirst below is only a fast-path lookup (to learn
+  // the code's owning user_id and give an early 400 for an unknown/expired
+  // code) — it is NOT itself atomic with the consume step, so two concurrent
+  // redeems of the SAME code can both pass it. The actual mutual exclusion
+  // is the compare-and-swap `updateMany` inside the transaction: it only
+  // flips machine_id when the code is STILL unconsumed and unexpired at
+  // that moment. The loser's `count` is 0, which throws and rolls back
+  // (via Prisma's interactive-transaction semantics) ITS machine create —
+  // so exactly one machine ever gets created per code, never two.
   async redeemPairingCode(
     body: PairRedeemRequest,
     lastIp: string | null,
@@ -93,25 +103,32 @@ export class MachinesService {
       throw new BadRequestException({ error: "invalid or expired code", code: "invalid_code" });
     }
 
-    const machine = await this.prisma.machine.create({
-      data: {
-        user_id: row.user_id,
-        name: body.name || "New machine",
-        token: this.crypto.randomToken(),
-        os: body.os ?? null,
-        os_version: body.os_version ?? null,
-        label: body.label ?? null,
-        agent_version: body.agent_version ?? null,
-        last_ip: lastIp,
-      },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      const machine = await tx.machine.create({
+        data: {
+          user_id: row.user_id,
+          name: body.name || "New machine",
+          token: this.crypto.randomToken(),
+          os: body.os ?? null,
+          os_version: body.os_version ?? null,
+          label: body.label ?? null,
+          agent_version: body.agent_version ?? null,
+          last_ip: lastIp,
+        },
+      });
 
-    await this.prisma.pairingCode.update({
-      where: { code: row.code },
-      data: { machine_id: machine.id },
-    });
+      const consumed = await tx.pairingCode.updateMany({
+        where: { code: body.code, machine_id: null, expires_at: { gt: new Date() } },
+        data: { machine_id: machine.id },
+      });
+      if (consumed.count === 0) {
+        // Lost the race (or expired between the fast-path check and here) —
+        // throwing here rolls back the machine create above.
+        throw new BadRequestException({ error: "invalid or expired code", code: "invalid_code" });
+      }
 
-    return { machineToken: machine.token, machineId: machine.id };
+      return { machineToken: machine.token, machineId: machine.id };
+    });
   }
 
   // Strips the secret token (and user_id) from a machine row for list/detail responses.

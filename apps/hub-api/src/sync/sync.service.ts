@@ -308,34 +308,62 @@ export class SyncService {
 
     // True conflict — park the candidate (keyed by its own full hash — §7.4
     // fix), open a conflict, notify. Canonical untouched, so there's no CAS
-    // risk here and this branch is never retried.
+    // risk here and this branch is never retried for the file-state write —
+    // but a partial unique index (uniq_open_conflict: project_id+filename
+    // WHERE status='open', see schema.prisma) enforces at most one OPEN
+    // conflict row per file, so two concurrent conflicting pushes to the
+    // SAME file can both reach this branch and race to create it.
     const candidateHash = this.relayStore.writeBlob(machine.user_id, content);
-    let conflictId!: number;
+    let conflictId: number;
 
-    await this.prisma.$transaction(async (tx) => {
-      const c = await tx.conflict.create({
-        data: {
-          project_id: projectId,
-          filename,
-          machine_id: machine.id,
-          candidate_hash: candidateHash,
-          auto_merged: 0,
-          status: "open",
-        },
+    try {
+      conflictId = await this.prisma.$transaction(async (tx) => {
+        const c = await tx.conflict.create({
+          data: {
+            project_id: projectId,
+            filename,
+            machine_id: machine.id,
+            candidate_hash: candidateHash,
+            auto_merged: 0,
+            status: "open",
+          },
+        });
+        await tx.event.create({
+          data: {
+            user_id: machine.user_id,
+            machine_id: machine.id,
+            project_id: projectId,
+            type: "conflict",
+            filename,
+            bytes: Buffer.byteLength(content, "utf8"),
+            // legacy records no latency_ms on the conflict path
+          },
+        });
+        return c.id;
       });
-      conflictId = c.id;
-      await tx.event.create({
-        data: {
-          user_id: machine.user_id,
-          machine_id: machine.id,
-          project_id: projectId,
-          type: "conflict",
-          filename,
-          bytes: Buffer.byteLength(content, "utf8"),
-          // legacy records no latency_ms on the conflict path
-        },
+    } catch (err) {
+      if (!this.isUniqueConstraintError(err)) {
+        throw err;
+      }
+      // Lost the race on uniq_open_conflict: another push already opened a
+      // conflict for this exact file microseconds earlier. Surface ITS id
+      // rather than erroring or creating a second open conflict row — both
+      // conflicting pushes end up pointing at the same one to resolve.
+      const existing = await this.prisma.conflict.findFirst({
+        where: { project_id: projectId, filename, status: "open" },
+        orderBy: { created_at: "asc" },
       });
-    });
+      if (!existing) {
+        // Unreachable in practice: a P2002 on uniq_open_conflict means an
+        // open row exists by definition. Don't swallow a genuinely
+        // different unique-constraint error behind a confusing conflict
+        // response if this invariant is ever violated.
+        throw err;
+      }
+      conflictId = existing.id;
+      await this.touch(machine);
+      return { status: "conflict", conflictId };
+    }
 
     await this.notifyBestEffort({
       user_id: machine.user_id,
