@@ -18,7 +18,7 @@ import {
 } from "../components/ui/card.js";
 
 export function Login() {
-  const { login, token } = useAuth();
+  const { login, token, isLoading } = useAuth();
   const navigate = useNavigate();
 
   const [email, setEmail] = useState("");
@@ -26,6 +26,11 @@ export function Login() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Still checking a stored token — don't decide anything yet, or a
+  // stale/expired token would bounce /login -> / -> /login once the
+  // deferred 401 comes back.
+  if (isLoading) return null;
 
   // Already signed in (e.g. direct nav to /login) — bounce home.
   if (token) return <Navigate to="/" />;

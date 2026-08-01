@@ -19,6 +19,14 @@ import { ApiError } from "../lib/api-error.js";
 /** localStorage key the bearer token is persisted under across reloads. */
 export const AUTH_TOKEN_STORAGE_KEY = "synchub_token";
 
+// Backoff (ms) between rehydration retries on a non-401 getMe() failure
+// (network blip, 5xx, etc.) — 1 initial attempt + these 2 retries.
+const REHYDRATE_RETRY_DELAYS_MS = [300, 800];
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 interface AuthContextValue {
   user: MeResponse | null;
   token: string | null;
@@ -38,6 +46,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // Guards against StrictMode's dev-mode double-invoke applying a result
+    // (or scheduling a retry) after this effect instance has been torn down.
+    let cancelled = false;
+
     const stored = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
     if (!stored) {
       setIsLoading(false);
@@ -47,17 +59,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthToken(stored);
     setToken(stored);
 
-    getMe()
-      .then((me) => setUser(me))
-      .catch((err) => {
-        if (err instanceof ApiError && err.status === 401) {
-          window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-          setAuthToken(null);
-          setToken(null);
-          setUser(null);
+    async function rehydrate() {
+      for (let attempt = 0; attempt <= REHYDRATE_RETRY_DELAYS_MS.length; attempt++) {
+        if (cancelled) return;
+        try {
+          const me = await getMe();
+          if (!cancelled) setUser(me);
+          return;
+        } catch (err) {
+          if (cancelled) return;
+
+          if (err instanceof ApiError && err.status === 401) {
+            // Session is actually invalid — clear it, no point retrying.
+            window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+            setAuthToken(null);
+            setToken(null);
+            setUser(null);
+            return;
+          }
+
+          const hasRetryLeft = attempt < REHYDRATE_RETRY_DELAYS_MS.length;
+          if (!hasRetryLeft) {
+            // Exhausted retries on a non-401 error (network blip, 5xx,
+            // bad response shape, ...). Keep the token — it may still be
+            // valid, this may just be a transient failure — but leave
+            // `user` null. isLoading still flips false below so the app
+            // renders instead of hanging on the splash forever.
+            return;
+          }
+          await delay(REHYDRATE_RETRY_DELAYS_MS[attempt]);
         }
-      })
-      .finally(() => setIsLoading(false));
+      }
+    }
+
+    rehydrate().finally(() => {
+      if (!cancelled) setIsLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
