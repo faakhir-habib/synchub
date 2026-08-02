@@ -1,8 +1,9 @@
 // Stub screens for sidebar destinations that later Phase 3 tasks flesh out
 // (3b/3c bring the real Projects/Machines/Conflicts/Notifications/Settings
 // screens). They exist now so the persistent shell has real navigation
-// targets instead of dead links. The Dashboard (3a-6) is the one screen
-// that's real already — see routes/Dashboard.tsx.
+// targets instead of dead links. Dashboard (3a-6), Projects/ProjectDetail
+// (3b-2/3b-3), and Machines (3b-4) are real already — see routes/Dashboard.tsx,
+// routes/Projects.tsx, routes/ProjectDetail.tsx, routes/Machines.tsx.
 function PlaceholderPage({ title, blurb }: { title: string; blurb: string }) {
   return (
     <div className="flex flex-col gap-2">
@@ -12,15 +13,6 @@ function PlaceholderPage({ title, blurb }: { title: string; blurb: string }) {
         Coming soon
       </div>
     </div>
-  );
-}
-
-export function Machines() {
-  return (
-    <PlaceholderPage
-      title="Machines"
-      blurb="Every machine synced to your projects, and whether it's currently reachable."
-    />
   );
 }
 
