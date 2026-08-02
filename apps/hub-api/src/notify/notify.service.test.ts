@@ -34,6 +34,7 @@ afterAll(async () => {
 beforeEach(() => {
   realtime = {
     notifyProjectChanged: vi.fn(),
+    notifyDeleted: vi.fn(),
     syncProgress: vi.fn(),
     syncComplete: vi.fn(),
     broadcastPresence: vi.fn(),

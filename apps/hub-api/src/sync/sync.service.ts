@@ -375,6 +375,66 @@ export class SyncService {
     return { status: "conflict", conflictId };
   }
 
+  // Remove a file's canonical record and fan out so other agents + browsers
+  // drop it too (audit #5/#12 — kill file resurrection at the source: once
+  // the file_state row is gone, a stale agent's next manifest diff will no
+  // longer see it as "missing locally, needs pull" and resurrect it).
+  // Idempotent: deleting an already-gone filename is a no-op 200, not a 404,
+  // so a retried/duplicate delete from a flaky agent connection is safe.
+  async deleteFile(machine: Machine, projectId: number, filename: string): Promise<{ status: "deleted" }> {
+    await this.requireMapping(machine, projectId);
+
+    if (!isSafeFilename(filename)) {
+      throw new BadRequestException({ error: "invalid filename" });
+    }
+
+    const existing = await this.prisma.fileState.findUnique({
+      where: { project_id_filename: { project_id: projectId, filename } },
+    });
+
+    if (existing) {
+      // deleteMany (not delete): guards against a race where a concurrent
+      // duplicate delete already removed the row between the read above and
+      // this write — `count` would be 0 and we simply skip the event/fan-out
+      // rather than throwing on a missing record.
+      const deleted = await this.prisma.$transaction(async (tx) => {
+        const result = await tx.fileState.deleteMany({
+          where: { project_id: projectId, filename },
+        });
+        if (result.count === 0) return false;
+
+        await tx.event.create({
+          data: {
+            user_id: machine.user_id,
+            machine_id: machine.id,
+            project_id: projectId,
+            type: "delete",
+            filename,
+            bytes: existing.size,
+          },
+        });
+        return true;
+      });
+
+      // Deliberately NOT deleting the blob here — content is content-
+      // addressed and may still be referenced elsewhere; the existing orphan
+      // GC (relay-store's reclaim pass) reclaims it once nothing points to
+      // it anymore.
+      if (deleted) {
+        const project = await this.prisma.project.findUnique({
+          where: { id: projectId },
+          select: { user_id: true },
+        });
+        if (project) {
+          this.realtime.notifyDeleted(project.user_id, projectId, filename, machine.id);
+        }
+      }
+    }
+
+    await this.touch(machine);
+    return { status: "deleted" };
+  }
+
   // Live progress + completion for the pushing user's own browsers, fired
   // AFTER the persisting transaction commits — single-file push, so it's
   // always completed:1/total:1 (richer multi-file granularity is a Phase-4

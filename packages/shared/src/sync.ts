@@ -24,6 +24,11 @@ export const PushResponse = z.object({
 });
 export type PushResponse = z.infer<typeof PushResponse>;
 
+export const DeleteRequest = z.object({
+  filename: z.string(),
+});
+export type DeleteRequest = z.infer<typeof DeleteRequest>;
+
 export const AgentMapping = z.object({
   project_id: z.number().int(),
   machine_id: z.number().int(),

@@ -341,6 +341,53 @@ export class RealtimeGateway implements OnModuleInit, OnModuleDestroy, RealtimeP
     }
   }
 
+  // Fire-and-forget per the RealtimePort contract, same shape as
+  // notifyProjectChanged above. Unlike that method, the caller already knows
+  // the owning user (SyncService.deleteFile looked up project.user_id after
+  // committing the delete), so it's passed straight through here instead of
+  // being re-derived from a project lookup — the project row is still
+  // fetched below, but only for its sync_mode (the auto-vs-manual agent
+  // fan-out gate).
+  notifyDeleted(userId: number, projectId: number, filename: string, excludeMachineId?: number): void {
+    void this.fanOutDeleted(userId, projectId, filename, excludeMachineId);
+  }
+
+  private async fanOutDeleted(
+    userId: number,
+    projectId: number,
+    filename: string,
+    excludeMachineId?: number,
+  ): Promise<void> {
+    try {
+      const project = await this.prisma.project.findUnique({ where: { id: projectId } });
+      if (!project) return;
+
+      // Auto-mode only: tell every other mapped agent to drop the file —
+      // mirrors fanOutChanged's targeting rule exactly.
+      if (project.sync_mode === "auto") {
+        const mappings = await this.prisma.mapping.findMany({ where: { project_id: projectId } });
+        for (const mapping of mappings) {
+          if (mapping.machine_id === excludeMachineId) continue;
+          this.sendTo(this.agentsByMachine.get(mapping.machine_id), {
+            type: "deleted",
+            projectId,
+            filename,
+          });
+        }
+      }
+
+      // Owning user's browsers always hear about it, regardless of sync mode.
+      this.sendTo(this.usersByUser.get(userId), {
+        type: "deleted",
+        projectId,
+        filename,
+      });
+    } catch {
+      // DB blip or the project/mappings vanished mid-lookup — best-effort
+      // fan-out, never a fatal error for the caller that triggered it.
+    }
+  }
+
   // Not part of RealtimePort — a broker extra used by the manual "sync now"
   // route (Task 5) to nudge every mapped agent regardless of sync_mode
   // (unlike notifyProjectChanged, which only auto-fans-out agents in "auto"

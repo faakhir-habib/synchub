@@ -41,6 +41,13 @@ function dispatch(msg: WsMessage, queryClient: QueryClient): void {
       queryClient.invalidateQueries({ queryKey: qk.activity });
       return;
 
+    case "deleted":
+      queryClient.invalidateQueries({ queryKey: qk.project(msg.projectId) });
+      queryClient.invalidateQueries({ queryKey: qk.projectConflicts(msg.projectId) });
+      queryClient.invalidateQueries({ queryKey: qk.dashboardMetrics });
+      queryClient.invalidateQueries({ queryKey: qk.activity });
+      return;
+
     case "sync-progress":
       // Transient per-file progress — drives the live indicator on Project
       // Detail via progress-store (module-level, outside the query cache).

@@ -16,6 +16,13 @@ export const WsChanged = z.object({
   hash: z.string(),
 });
 
+// --- Agent-directed: file deleted (also reused browser-side as invalidation) ---
+export const WsDeleted = z.object({
+  type: z.literal("deleted"),
+  projectId: z.number().int(),
+  filename: z.string(),
+});
+
 // --- Agent-directed: manual-mode "sync now" trigger (renamed from "sync") ---
 export const WsSyncTrigger = z.object({
   type: z.literal("sync-trigger"),
@@ -70,6 +77,7 @@ export const WsNotification = z.object({
 export const WsMessage = z.discriminatedUnion("type", [
   WsWelcome,
   WsChanged,
+  WsDeleted,
   WsSyncTrigger,
   WsPresence,
   WsSyncProgress,

@@ -11,7 +11,7 @@ import {
 } from "@nestjs/common";
 import type { Machine } from "@prisma/client";
 import type { Response } from "express";
-import { PushRequest } from "@synchub/shared";
+import { DeleteRequest, PushRequest } from "@synchub/shared";
 import { SyncService } from "./sync.service.js";
 import { MachineAuthGuard } from "../common/auth/machine-auth.guard.js";
 import { CurrentMachine } from "../common/auth/current-user.decorator.js";
@@ -70,5 +70,15 @@ export class SyncController {
       res.status(409);
     }
     return result;
+  }
+
+  @Post("delete/:projectId")
+  @HttpCode(200)
+  delete(
+    @CurrentMachine() machine: Machine,
+    @Param("projectId", ParseIntPipe) projectId: number,
+    @Body(zodBody(DeleteRequest)) body: DeleteRequest,
+  ) {
+    return this.sync.deleteFile(machine, projectId, body.filename);
   }
 }

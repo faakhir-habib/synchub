@@ -273,4 +273,69 @@ describe("RealtimeGateway fan-out", () => {
     agentB.ws.close();
     user.ws.close();
   });
+
+  it("fans out notifyDeleted to other auto-mode agents + the owning user's browser, excluding the origin machine", async () => {
+    const { token, userId } = await signup();
+    const project = await createProject(userId, "auto");
+    const machineA = await createMachine(token);
+    const machineB = await createMachine(token);
+    await mapMachine(project.id, machineA.id, "/home/a/proj");
+    await mapMachine(project.id, machineB.id, "/home/b/proj");
+
+    const user = connect(`ws://127.0.0.1:${port}/ws/user?token=${token}`);
+    await waitForOpen(user.ws);
+    await user.nextMessageOfType("welcome");
+
+    const agentA = connect(`ws://127.0.0.1:${port}/ws/agent?token=${machineA.machineToken}`);
+    await waitForOpen(agentA.ws);
+    await agentA.nextMessageOfType("welcome");
+    await user.nextMessageOfType("presence"); // A online
+
+    const agentB = connect(`ws://127.0.0.1:${port}/ws/agent?token=${machineB.machineToken}`);
+    await waitForOpen(agentB.ws);
+    await agentB.nextMessageOfType("welcome");
+    await user.nextMessageOfType("presence"); // B online
+
+    // Origin is machineA — excluded from the agent fan-out, but the user's
+    // browser always hears it and machineB (auto mode) hears it too.
+    gateway.notifyDeleted(userId, project.id, "session.jsonl", machineA.id);
+
+    const deletedForB = await agentB.nextMessageOfType("deleted");
+    expect(deletedForB).toEqual({
+      type: "deleted",
+      projectId: project.id,
+      filename: "session.jsonl",
+    });
+
+    const deletedForUser = await user.nextMessageOfType("deleted");
+    expect(deletedForUser).toEqual({
+      type: "deleted",
+      projectId: project.id,
+      filename: "session.jsonl",
+    });
+
+    // By the time B and the user have received their "deleted" frames, the
+    // fan-out loop has fully run — if A were going to receive anything, it'd
+    // already be sitting in its queue.
+    await agentA.expectNoMessage();
+
+    // Manual mode: no agent fan-out, but the browser still hears it.
+    await prisma.project.update({ where: { id: project.id }, data: { sync_mode: "manual" } });
+
+    gateway.notifyDeleted(userId, project.id, "other.jsonl");
+
+    const deletedForUser2 = await user.nextMessageOfType("deleted");
+    expect(deletedForUser2).toEqual({
+      type: "deleted",
+      projectId: project.id,
+      filename: "other.jsonl",
+    });
+
+    await agentA.expectNoMessage();
+    await agentB.expectNoMessage();
+
+    agentA.ws.close();
+    agentB.ws.close();
+    user.ws.close();
+  });
 });
