@@ -6,6 +6,16 @@ import { Toaster } from "sonner";
 import { router } from "./router.js";
 import { ThemeProvider, useTheme } from "./theme/theme-provider.js";
 import { AuthProvider } from "./auth/auth-context.js";
+import "@fontsource/manrope/600.css";
+import "@fontsource/manrope/700.css";
+import "@fontsource/manrope/800.css";
+import "@fontsource/plus-jakarta-sans/400.css";
+import "@fontsource/plus-jakarta-sans/500.css";
+import "@fontsource/plus-jakarta-sans/600.css";
+import "@fontsource/plus-jakarta-sans/700.css";
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/500.css";
+import "@fontsource/jetbrains-mono/600.css";
 import "./styles/index.css";
 
 const queryClient = new QueryClient();
