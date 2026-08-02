@@ -20,14 +20,14 @@ docker compose up -d --build
 
 Open `http://localhost:8080`. Health: `GET /api/health` → `{"ok":true}`.
 
-**Verified end-to-end in Docker** (see `agent/e2e-docker.mjs`): signup, pairing
-codes, two agents, push/pull, append-only auto-merge, live WebSocket fan-out,
-the chokidar file-watcher, UI serving, and data persistence across restart.
+**Verified end-to-end** (see `apps/agent/test/agent-integration.e2e.test.ts`):
+signup, pairing codes, agents, push/pull, append-only auto-merge, live
+WebSocket fan-out, the file-watcher, UI serving, and data persistence across
+restart.
 
 ```bash
-# Re-run the container e2e any time the Hub is up on :8080
-cd agent && node --disable-warning=ExperimentalWarning e2e-docker.mjs
-# (point elsewhere with HUB=https://synchub.example.com)
+# Re-run the agent's own e2e suite
+pnpm --filter @synchub/agent test
 ```
 
 ## Coolify (mylogiclab.cloud)
@@ -44,8 +44,9 @@ cd agent && node --disable-warning=ExperimentalWarning e2e-docker.mjs
 6. Deploy. Verify the tunnel forwards **WebSocket upgrades** to `/ws/agent` and
    `/ws/user` (Cloudflare does by default; confirm no buffering/timeout).
 
-Then on each machine: `Machines → Connect machine` in the UI for a code, and
-`node agent/src/cli.js pair <CODE> https://<your-hub-domain>` → `run`.
+Then on each machine: install the `synchub-agent` binary (see root `README.md`
+→ "Installing the Agent"), `Machines → Connect machine` in the UI for a code,
+then `synchub-agent pair <CODE> https://<your-hub-domain>` → `synchub-agent install`.
 
 ## Notes / hardening before wider use
 

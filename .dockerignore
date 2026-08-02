@@ -34,9 +34,11 @@ Thumbs.db
 .turbo/
 
 # Legacy stacks not used by this image (root-anchored: do NOT match the
-# workspace package at apps/agent/, which is unrelated new-architecture code)
+# workspace package at apps/agent/, which is unrelated new-architecture code).
+# The legacy root agent/ has been deleted (superseded by apps/agent); /hub/
+# stays since untracked runtime leftovers (hub/data/, hub/node_modules/) can
+# still exist locally and aren't covered by the **/node_modules/ rule above.
 /hub/
-/agent/
 
 # Docs
 docs/

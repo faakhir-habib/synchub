@@ -11,10 +11,6 @@ node_modules/
 *.sqlite-*
 *.db
 
-# Agent runtime config/state
-/agent/config.json
-/agent/state/
-
 # OS / editor
 .DS_Store
 Thumbs.db
@@ -23,10 +19,6 @@ Thumbs.db
 dist/
 build/
 out/
-
-# Agent optional electron
-/agent/electron/node_modules/
-/agent/electron/icon.png
 
 # monorepo
 node_modules/
