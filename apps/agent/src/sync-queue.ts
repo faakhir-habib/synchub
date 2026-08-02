@@ -1,7 +1,7 @@
 // A single serialized work queue. Tasks are run strictly one at a time
 // (never overlapping), same-key bursts are coalesced, a throwing task
-// never breaks the queue, and close() drains the in-flight task and
-// stops accepting new work.
+// never breaks the queue, and close() finishes the in-flight task and
+// then abandons the rest for a fast, bounded shutdown.
 //
 // This fixes two legacy-agent problems: overlapping reconciles racing
 // each other, and no graceful drain on shutdown.
@@ -61,12 +61,25 @@ export class SyncQueue {
   }
 
   /**
-   * Wait for the in-flight task to finish and stop accepting new work.
-   * Already-pending jobs are NOT run — close() drains only the current
-   * in-flight task, then resolves.
+   * Finish the in-flight task, then abandon any remaining pending jobs
+   * (including queued reruns) and stop accepting new work. This is a
+   * fast, bounded shutdown, not a full drain: abandoned jobs are not run.
+   * That's safe here because callers re-diff on the next boot reconcile,
+   * so nothing is lost — it's simply picked up again later.
    */
   async close(): Promise<void> {
     this.closed = true;
+    if (this.idlePromise) {
+      await this.idlePromise;
+    }
+  }
+
+  /**
+   * Wait for the queue to go idle naturally — i.e. for everything
+   * currently pending/running to finish — WITHOUT stopping it from
+   * accepting new work. Unlike close(), this never abandons pending jobs.
+   */
+  async whenIdle(): Promise<void> {
     if (this.idlePromise) {
       await this.idlePromise;
     }
@@ -83,6 +96,11 @@ export class SyncQueue {
 
   private async run(): Promise<void> {
     while (this.pending.length > 0) {
+      // close() only guarantees the in-flight task finishes. Once closed,
+      // stop picking up further pending jobs rather than draining the
+      // whole backlog — that's what makes shutdown fast and bounded.
+      if (this.closed) break;
+
       const job = this.pending.shift();
       if (!job) break;
       this.pendingKeys.delete(job.key);
@@ -91,10 +109,18 @@ export class SyncQueue {
       try {
         await job.task();
       } catch (err) {
-        this.onError?.(err, job.key);
+        try {
+          this.onError?.(err, job.key);
+        } catch (onErrorErr) {
+          // A throwing onError must never wedge the consumer loop or
+          // leave close()/whenIdle() hanging forever.
+          console.error("SyncQueue onError callback threw:", onErrorErr);
+        }
       }
 
       this.runningKey = null;
+
+      if (this.closed) break;
 
       const rerun = this.rerunTasks.get(job.key);
       if (rerun) {
@@ -102,6 +128,14 @@ export class SyncQueue {
         this.pending.push({ key: job.key, task: rerun });
         this.pendingKeys.add(job.key);
       }
+    }
+
+    if (this.closed) {
+      // Abandon whatever's left — the next boot reconcile re-diffs and
+      // picks these back up, so nothing is silently lost.
+      this.pending.length = 0;
+      this.pendingKeys.clear();
+      this.rerunTasks.clear();
     }
 
     this.loopRunning = false;

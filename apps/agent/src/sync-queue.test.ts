@@ -66,7 +66,9 @@ describe("SyncQueue", () => {
       order.push("z");
     });
 
-    await queue.close();
+    // Use whenIdle() (not close()) here: this test is about ordering, not
+    // about close()'s abandon-pending shutdown semantics.
+    await queue.whenIdle();
     expect(order).toEqual(["x", "y", "z"]);
   });
 
@@ -88,7 +90,10 @@ describe("SyncQueue", () => {
       ran.push("ok");
     });
 
-    await queue.close();
+    // whenIdle() (not close()): asserting that "ok" still runs after
+    // "fail" throws is about error isolation, not close()'s shutdown
+    // semantics.
+    await queue.whenIdle();
 
     expect(ran).toEqual(["fail", "ok"]);
     expect(errors).toEqual([{ err: boom, key: "fail" }]);
@@ -118,7 +123,9 @@ describe("SyncQueue", () => {
     });
 
     gate.resolve();
-    await queue.close();
+    // whenIdle() (not close()): this test is about pending-window
+    // coalescing, not close()'s shutdown semantics.
+    await queue.whenIdle();
 
     expect(firstInvocations).toBe(1);
     expect(otherRuns).toBe(0);
@@ -154,7 +161,9 @@ describe("SyncQueue", () => {
     });
 
     gate.resolve();
-    await queue.close();
+    // whenIdle() (not close()): this test is about running-window
+    // coalescing (the rerun), not close()'s shutdown semantics.
+    await queue.whenIdle();
 
     expect(runCount).toBe(2);
   });
@@ -188,5 +197,83 @@ describe("SyncQueue", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(ranAfterClose).toBe(false);
+  });
+
+  it("close() finishes the in-flight task but abandons remaining pending jobs", async () => {
+    const gate = deferred();
+    const ran: string[] = [];
+    const queue = new SyncQueue();
+
+    queue.enqueue("a", async () => {
+      ran.push("a");
+      await gate.promise;
+    });
+    queue.enqueue("b", async () => {
+      ran.push("b");
+    });
+    queue.enqueue("c", async () => {
+      ran.push("c");
+    });
+
+    // Give the loop a tick to start "a" (which then suspends on its gate),
+    // leaving "b" and "c" behind it in the pending backlog.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(ran).toEqual(["a"]);
+
+    const closePromise = queue.close();
+    gate.resolve();
+    await closePromise;
+
+    // Fast, bounded shutdown: "a" (in-flight) finished, but "b" and "c"
+    // were abandoned rather than drained — they're picked up again by the
+    // next boot reconcile instead.
+    expect(ran).toEqual(["a"]);
+  });
+
+  it("does not let a throwing onError stop the queue from processing the next task", async () => {
+    const ran: string[] = [];
+    const queue = new SyncQueue({
+      onError: () => {
+        throw new Error("onError also throws");
+      },
+    });
+
+    queue.enqueue("fail", async () => {
+      ran.push("fail");
+      throw new Error("boom");
+    });
+    queue.enqueue("ok", async () => {
+      ran.push("ok");
+    });
+
+    await queue.whenIdle();
+    expect(ran).toEqual(["fail", "ok"]);
+  });
+
+  it("does not let a throwing onError deadlock close()", async () => {
+    const gate = deferred();
+    const queue = new SyncQueue({
+      onError: () => {
+        throw new Error("onError also throws");
+      },
+    });
+
+    queue.enqueue("fail", async () => {
+      await gate.promise;
+      throw new Error("boom");
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const closePromise = queue.close();
+    gate.resolve();
+
+    // Before the fix, an unguarded onError throw escaped the consumer
+    // loop mid-iteration, leaving runningKey/idleResolve stuck forever —
+    // so close() never resolved. If that regresses, this await hangs and
+    // vitest's test timeout is the backstop.
+    await closePromise;
   });
 });
