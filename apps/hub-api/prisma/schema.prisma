@@ -1,0 +1,179 @@
+generator client {
+  provider      = "prisma-client-js"
+  // "native" for local dev; "debian-openssl-3.0.x" for the node:22-slim (bookworm)
+  // Docker runtime — the query-engine binary must match the deployment OS/openssl.
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 Int            @id @default(autoincrement())
+  email              String         @unique
+  password_hash      String
+  password_salt      String
+  name               String?
+  notify_webhook_url String?
+  // Int-as-boolean (SQLite has no bool). API must map Int->boolean; see @synchub/shared api.ts.
+  notify_conflicts   Int            @default(1)
+  notify_sync        Int            @default(1)
+  created_at         DateTime       @default(now())
+  sessions           Session[]
+  machines           Machine[]
+  projects           Project[]
+  notifications      Notification[]
+  events             Event[]
+  pairingCodes       PairingCode[]
+
+  @@map("users")
+}
+
+model Session {
+  token      String    @id
+  user_id    Int
+  created_at DateTime  @default(now())
+  expires_at DateTime?
+  user       User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model Machine {
+  id            Int           @id @default(autoincrement())
+  user_id       Int
+  name          String
+  token         String        @unique
+  os            String?
+  os_version    String?
+  label         String?
+  agent_version String?
+  last_ip       String?
+  status        String        @default("offline")
+  last_seen_at  DateTime?
+  created_at    DateTime      @default(now())
+  user          User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  mappings      Mapping[]
+  pairingCodes  PairingCode[]
+  fileStates    FileState[]
+  conflicts     Conflict[]
+  events        Event[]
+
+  @@map("machines")
+}
+
+model PairingCode {
+  code       String   @id
+  user_id    Int
+  machine_id Int?
+  expires_at DateTime
+  created_at DateTime @default(now())
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  machine    Machine? @relation(fields: [machine_id], references: [id], onDelete: Cascade)
+
+  @@map("pairing_codes")
+}
+
+model Project {
+  id         Int         @id @default(autoincrement())
+  user_id    Int
+  alias      String
+  sync_mode  String      @default("auto")
+  created_at DateTime    @default(now())
+  user       User        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  mappings   Mapping[]
+  fileStates FileState[]
+  conflicts  Conflict[]
+  events     Event[]
+
+  @@unique([user_id, alias])
+  @@map("projects")
+}
+
+model Mapping {
+  id         Int      @id @default(autoincrement())
+  project_id Int
+  machine_id Int
+  local_path String
+  created_at DateTime @default(now())
+  project    Project  @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  machine    Machine  @relation(fields: [machine_id], references: [id], onDelete: Cascade)
+
+  @@unique([project_id, machine_id])
+  @@index([machine_id])
+  @@map("mappings")
+}
+
+model FileState {
+  id              Int      @id @default(autoincrement())
+  project_id      Int
+  filename        String
+  hash            String
+  size            Int      @default(0)
+  last_machine_id Int?
+  updated_at      DateTime @default(now())
+  project         Project  @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  machine         Machine? @relation(fields: [last_machine_id], references: [id], onDelete: SetNull)
+
+  @@unique([project_id, filename])
+  @@index([project_id])
+  @@map("file_state")
+}
+
+model Conflict {
+  id             Int       @id @default(autoincrement())
+  project_id     Int
+  filename       String
+  machine_id     Int?
+  candidate_hash String
+  auto_merged    Int       @default(0)
+  status         String    @default("open")
+  created_at     DateTime  @default(now())
+  resolved_at    DateTime?
+  project        Project   @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  machine        Machine?  @relation(fields: [machine_id], references: [id], onDelete: SetNull)
+
+  // NOTE: migration 20260801205430_uniq_open_conflict additionally creates a
+  // hand-written PARTIAL unique index that Prisma's schema language cannot
+  // express and which is therefore NOT declared below:
+  //   CREATE UNIQUE INDEX "uniq_open_conflict" ON "conflicts"("project_id", "filename") WHERE "status" = 'open';
+  // It enforces at most one OPEN conflict per (project_id, filename). The
+  // migration file is the source of truth for this constraint — do not let
+  // a future `prisma migrate dev`/`migrate diff` drop it by "fixing" a
+  // perceived schema drift.
+  @@index([project_id, status])
+  @@map("conflicts")
+}
+
+model Notification {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  type       String
+  title      String
+  body       String?
+  read       Int      @default(0)
+  created_at DateTime @default(now())
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model Event {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  machine_id Int?
+  project_id Int?
+  type       String
+  filename   String?
+  bytes      Int      @default(0)
+  latency_ms Int?
+  created_at DateTime @default(now())
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  machine    Machine? @relation(fields: [machine_id], references: [id], onDelete: SetNull)
+  project    Project? @relation(fields: [project_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id, created_at])
+  @@map("events")
+}
