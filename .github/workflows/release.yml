@@ -40,6 +40,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # build:sea bundles the agent with esbuild, which must resolve the
+      # @synchub/shared workspace dependency from its built dist/. Build it
+      # first (the Docker image and ci.yml build it too, just implicitly).
+      - name: Build @synchub/shared (esbuild needs its dist to bundle the agent)
+        run: pnpm --filter @synchub/shared build
+
       - name: Build SEA binary
         run: pnpm --filter @synchub/agent build:sea
 
