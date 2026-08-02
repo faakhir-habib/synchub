@@ -20,6 +20,7 @@ import { join } from "node:path";
 import type { AgentMapping } from "@synchub/shared";
 
 import type { Api } from "./api.js";
+import { isSafeFilename } from "./safe-filename.js";
 import type { AgentState } from "./state.js";
 import { hashContent } from "./hasher.js";
 
@@ -171,6 +172,14 @@ export async function reconcileProject(deps: ReconcileDeps, target: ProjectTarge
     try {
       const hub = manifest.get(filename);
       const loc = local[filename];
+
+      // hub-supplied (manifest) filenames are untrusted: reject anything
+      // that could escape localPath via join() before it's ever pulled or
+      // written (path-traversal guard).
+      if (hub && !isSafeFilename(filename)) {
+        log(`reconcile: unsafe filename "${filename}" in project ${projectId}'s Hub manifest — skipped (possible traversal)`);
+        continue;
+      }
 
       if (hub && !loc) {
         // Hub-only. Don't resurrect a file this agent just deleted locally.

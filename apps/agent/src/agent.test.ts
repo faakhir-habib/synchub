@@ -282,6 +282,41 @@ describe("runAgent", () => {
     await handle.stop();
   });
 
+  it("a deleted message with an unsafe (path-traversal) filename is skipped: no unlink, no state.del", async () => {
+    const dir = tmpDir();
+    const m = mapping({ project_id: 5, local_path: dir, sync_mode: "auto" });
+    const api = makeApi({ getMappings: vi.fn(async () => ({ ok: true, data: [m] })) });
+    const state = makeState();
+    const sockets: ReturnType<typeof makeFakeWs>[] = [];
+    const wsFactory: WsFactory = () => {
+      const s = makeFakeWs();
+      sockets.push(s);
+      return s;
+    };
+
+    const handle = runAgent(cfg, {
+      log,
+      notify,
+      apiFactory: () => api,
+      stateFactory: () => state,
+      watcherFactory: () => makeFakeWatcher(),
+      wsFactory,
+    });
+
+    await handle.whenIdle();
+
+    sockets[0]!.emit(
+      "message",
+      JSON.stringify({ type: "deleted", projectId: 5, filename: "../evil.jsonl" }),
+    );
+    await handle.whenIdle();
+
+    expect(state.del).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/unsafe|traversal|skip/i));
+
+    await handle.stop();
+  });
+
   it("a ws (re)connect enqueues a fresh reconcile:all catch-up", async () => {
     const dir = tmpDir();
     const m = mapping({ project_id: 1, local_path: dir, sync_mode: "auto" });

@@ -231,6 +231,21 @@ describe("reconcile", () => {
       expect(existsSync(join(localDir, "deleted.jsonl"))).toBe(false);
     });
 
+    it("manifest entry with an unsafe (path-traversal) filename is skipped: no writeFile", async () => {
+      const manifest: ManifestEntry[] = [
+        { filename: "../evil.jsonl", hash: "hub-hash", size: 10, updated_at: "x" },
+      ];
+      const pull = vi.fn(async () => "should-not-be-written");
+      const api = makeApi({ getManifest: vi.fn(async () => ({ ok: true, data: manifest })), pull });
+
+      await reconcileProject(deps(api), { projectId: 1, localPath: localDir });
+
+      expect(pull).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledWith(expect.stringMatching(/unsafe|traversal|skip/i));
+      // Must not have escaped localDir either.
+      expect(existsSync(join(TEST_ROOT, "evil.jsonl"))).toBe(false);
+    });
+
     it("getManifest failure: skips the project, no throw, no partial corruption", async () => {
       const api = makeApi({ getManifest: vi.fn(async () => ({ ok: false, kind: "http", status: 500 })) });
 

@@ -26,6 +26,7 @@ import type { AgentConfig } from "./config.js";
 import { createNotifier } from "./notifier.js";
 import { reconcileAll, reconcileProject } from "./reconcile.js";
 import type { ReconcileDeps, Tombstones } from "./reconcile.js";
+import { isSafeFilename } from "./safe-filename.js";
 import { createState } from "./state.js";
 import type { AgentState } from "./state.js";
 import { SyncQueue } from "./sync-queue.js";
@@ -136,6 +137,10 @@ export function runAgent(cfg: AgentConfig, opts: RunAgentOptions = {}): AgentHan
       case "deleted": {
         const { projectId, filename } = msg;
         queue.enqueue(`delete:${projectId}/${filename}`, async () => {
+          if (!isSafeFilename(filename)) {
+            log(`deleted: unsafe filename "${filename}" from project ${projectId} — skipped (possible traversal)`);
+            return;
+          }
           const m = findMapping(projectId);
           if (!m) {
             log(`deleted: project ${projectId} isn't mapped locally — skipped`);

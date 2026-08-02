@@ -5,9 +5,13 @@
 //   - guarded JSON parse PLUS shared-schema validation: a malformed frame
 //     or one that doesn't match the shared WsMessage union is logged and
 //     dropped rather than forwarded as untyped garbage.
-//   - exponential backoff (base 1s, cap 30s), reset to base on a stable
-//     open, same shape as legacy but made explicit/testable via an
-//     injectable wsFactory + Vitest fake timers.
+//   - exponential backoff (base 1s, cap 30s), reset to base only after a
+//     STABLE open (the socket stays open for STABLE_MS) — a socket that
+//     opens then immediately closes (a "flap") must NOT reset the delay,
+//     or a repeatedly-rejected connection (e.g. a revoked token) would
+//     reconnect every ~1s forever instead of escalating. Same overall
+//     shape as legacy but made explicit/testable via an injectable
+//     wsFactory + Vitest fake timers.
 //   - intentional close() sets a flag so the underlying socket's 'close'
 //     event never schedules a reconnect after a deliberate shutdown.
 import WebSocket from "ws";
@@ -43,6 +47,8 @@ export interface WsHandle {
 
 const BASE_DELAY_MS = 1000;
 const MAX_DELAY_MS = 30000;
+/** How long a socket must stay open before we trust it and reset the backoff delay. */
+const STABLE_MS = 5000;
 
 function deriveWsUrl(hubUrl: string, machineToken: string): string {
   return `${hubUrl.replace(/^http/, "ws")}/ws/agent?token=${encodeURIComponent(machineToken)}`;
@@ -57,15 +63,31 @@ export function connectWs(cfg: ConnectWsConfig, opts: ConnectWsOptions): WsHandl
   let intentionalClose = false;
   let retryDelay = BASE_DELAY_MS;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let stableTimer: ReturnType<typeof setTimeout> | null = null;
   let socket: WsLike | null = null;
+
+  function clearStableTimer(): void {
+    if (stableTimer) {
+      clearTimeout(stableTimer);
+      stableTimer = null;
+    }
+  }
 
   function open(): void {
     socket = wsFactory(wsUrl);
 
     socket.on("open", () => {
-      // Reset backoff on any successful open — matches legacy's behavior of
-      // trusting the connection once the socket comes up.
-      retryDelay = BASE_DELAY_MS;
+      // Only reset the backoff once the socket has stayed open for
+      // STABLE_MS — a socket that opens then immediately closes (e.g. a
+      // token rejected right after the handshake) must keep the escalated
+      // delay, not reset to base on every flap. The reconnect-driven
+      // catch-up (onOpen) still fires on every open, unconditionally.
+      clearStableTimer();
+      stableTimer = setTimeout(() => {
+        stableTimer = null;
+        retryDelay = BASE_DELAY_MS;
+      }, STABLE_MS);
+      stableTimer.unref?.();
       log("ws connected");
       onOpen?.();
     });
@@ -90,7 +112,16 @@ export function connectWs(cfg: ConnectWsConfig, opts: ConnectWsOptions): WsHandl
     });
 
     socket.on("close", () => {
+      // The socket died (whether or not it ever reached stability) —
+      // cancel any pending stable-reset so a flap can't sneak a reset in
+      // between 'close' and the timer firing.
+      clearStableTimer();
       if (intentionalClose) return;
+      // Guard against double reconnect timers: only one may be scheduled
+      // at a time.
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         open();
@@ -100,7 +131,8 @@ export function connectWs(cfg: ConnectWsConfig, opts: ConnectWsOptions): WsHandl
     });
 
     socket.on("error", () => {
-      // The 'close' event (which always follows) handles reconnect scheduling.
+      // The 'close' event (which always follows) handles reconnect
+      // scheduling and stable-timer cleanup.
     });
   }
 
@@ -113,6 +145,7 @@ export function connectWs(cfg: ConnectWsConfig, opts: ConnectWsOptions): WsHandl
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
+      clearStableTimer();
       try {
         socket?.close();
       } catch {
