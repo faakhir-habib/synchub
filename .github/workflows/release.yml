@@ -19,8 +19,10 @@ jobs:
         include:
           - os: ubuntu-latest
             asset: synchub-agent-linux-x64
-          - os: macos-13
-            asset: synchub-agent-macos-x64
+          # Intel Mac (macos-13) dropped: scarce/slow runner capacity blocked
+          # releases, and Apple-Silicon (macos-14) covers all modern Macs.
+          # Add back a `macos-13 -> synchub-agent-macos-x64` entry here + the
+          # matching files line below if Intel Mac support is needed again.
           - os: macos-14
             asset: synchub-agent-macos-arm64
           - os: windows-latest
@@ -110,7 +112,6 @@ jobs:
           generate_release_notes: true
           files: |
             dist-artifacts/synchub-agent-linux-x64
-            dist-artifacts/synchub-agent-macos-x64
             dist-artifacts/synchub-agent-macos-arm64
             dist-artifacts/synchub-agent-win-x64.exe
             dist-artifacts/SHA256SUMS.txt
