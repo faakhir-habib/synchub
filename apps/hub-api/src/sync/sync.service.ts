@@ -388,6 +388,14 @@ export class SyncService {
       throw new BadRequestException({ error: "invalid filename" });
     }
 
+    // Delete is last-delete-wins by design (spec §4) — deliberately NOT
+    // hash-guarded (no CAS) the way push's canonical write is. A concurrent
+    // push racing this delete either loses (its write lands first, then this
+    // delete removes the row it just wrote) or wins (the file_state row it
+    // creates lands after this delete, which is indistinguishable from a
+    // normal first-sync). Either outcome is fine: there is no persistent
+    // deleted-here/alive-there split, so adding CAS here would only reject
+    // legitimate concurrent pushes for no correctness benefit.
     const existing = await this.prisma.fileState.findUnique({
       where: { project_id_filename: { project_id: projectId, filename } },
     });
@@ -410,6 +418,9 @@ export class SyncService {
             project_id: projectId,
             type: "delete",
             filename,
+            // `existing.size` is a pre-transaction read, so under the race
+            // above it could be stale by the time this commits — cosmetic
+            // event metadata only, not worth restructuring for.
             bytes: existing.size,
           },
         });
@@ -421,12 +432,24 @@ export class SyncService {
       // GC (relay-store's reclaim pass) reclaims it once nothing points to
       // it anymore.
       if (deleted) {
-        const project = await this.prisma.project.findUnique({
-          where: { id: projectId },
-          select: { user_id: true },
-        });
-        if (project) {
-          this.realtime.notifyDeleted(project.user_id, projectId, filename, machine.id);
+        // Fan-out is best-effort: the delete itself already committed above,
+        // so a transient failure in this lookup or in notifyDeleted (e.g. a
+        // DB hiccup) must never turn an already-successful delete into a 500
+        // for the agent — matches notifyBestEffort's rationale for push.
+        try {
+          const project = await this.prisma.project.findUnique({
+            where: { id: projectId },
+            select: { user_id: true },
+          });
+          if (project) {
+            this.realtime.notifyDeleted(project.user_id, projectId, filename, machine.id);
+          }
+        } catch (err) {
+          this.logger.error(
+            `delete fan-out failed (project_id=${projectId}, filename=${filename}): ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
         }
       }
     }
