@@ -41,6 +41,16 @@ describe("config", () => {
     expect(loadConfig()).toBeNull();
   });
 
+  it.each(["null", "[]", "42"])(
+    "returns null (not the raw value, no throw) when the config file contains %s (valid JSON, wrong shape)",
+    (content) => {
+      mkdirSync(TEST_DIR, { recursive: true });
+      writeFileSync(configFile, content);
+      expect(() => loadConfig()).not.toThrow();
+      expect(loadConfig()).toBeNull();
+    },
+  );
+
   it("creates the parent directory recursively if missing", () => {
     expect(existsSync(TEST_DIR)).toBe(false);
     saveConfig({ hubUrl: "http://h:8080", machineToken: "tok", machineId: 1 });

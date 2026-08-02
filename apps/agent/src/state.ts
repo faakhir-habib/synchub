@@ -19,7 +19,14 @@ export interface AgentState {
 function loadMap(path: string): Record<string, string> {
   if (!existsSync(path)) return {};
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as Record<string, string>;
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    // A file with valid JSON but the wrong shape (null, a number, a string,
+    // an array, ...) must also start clean — otherwise a later `set()`
+    // crashes trying to assign a property onto a non-object.
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return {};
+    }
+    return parsed as Record<string, string>;
   } catch {
     // Corrupt state file — start clean rather than crash-looping the agent.
     return {};

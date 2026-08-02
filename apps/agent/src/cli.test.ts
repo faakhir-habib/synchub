@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { cmdPair, cmdStatus, cmdVersion } from "./cli.js";
+import { cmdPair, cmdRun, cmdStatus, cmdVersion, main } from "./cli.js";
 import { VERSION } from "./version.js";
 import pkg from "../package.json" with { type: "json" };
 import type { AgentConfig } from "./config.js";
@@ -122,5 +122,55 @@ describe("cmdVersion", () => {
     expect(VERSION).toBe(pkg.version);
     expect(VERSION).not.toBe("0.0.0");
     expect(VERSION).toMatch(/^\d+\.\d+\.\d+/);
+  });
+});
+
+describe("cmdRun", () => {
+  it("returns 1 and logs a not-paired message when unpaired (loadConfig -> null)", () => {
+    const deps = makeDeps({ loadConfig: vi.fn(() => null) });
+
+    const code = cmdRun(deps);
+
+    expect(code).toBe(1);
+    expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/not paired/i));
+  });
+
+  it("returns 0 and logs the Phase 4b stub message when paired", () => {
+    const cfg: AgentConfig = { hubUrl: "http://hub:8080", machineToken: "tok", machineId: 7 };
+    const deps = makeDeps({ loadConfig: vi.fn(() => cfg) });
+
+    const code = cmdRun(deps);
+
+    expect(code).toBe(0);
+    expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/phase 4b/i));
+  });
+});
+
+describe("main", () => {
+  it("routes --version to cmdVersion", async () => {
+    const deps = makeDeps();
+
+    const code = await main(["node", "cli", "--version"], deps);
+
+    expect(code).toBe(0);
+    expect(deps.log).toHaveBeenCalledWith(VERSION);
+  });
+
+  it("prints usage and returns 1 for an unknown command", async () => {
+    const deps = makeDeps();
+
+    const code = await main(["node", "cli", "bogus"], deps);
+
+    expect(code).toBe(1);
+    expect(deps.log).toHaveBeenCalledWith(expect.stringContaining("Usage"));
+  });
+
+  it("prints usage and returns 0 when no command is given", async () => {
+    const deps = makeDeps();
+
+    const code = await main(["node", "cli"], deps);
+
+    expect(code).toBe(0);
+    expect(deps.log).toHaveBeenCalledWith(expect.stringContaining("Usage"));
   });
 });
