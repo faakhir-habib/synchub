@@ -1,14 +1,128 @@
 #!/usr/bin/env node
+import os from "node:os";
+import { fileURLToPath } from "node:url";
 
-const VERSION = "0.1.0";
+import { pairRedeem } from "./api.js";
+import { loadConfig as loadConfigImpl, saveConfig as saveConfigImpl } from "./config.js";
+import { configPath } from "./paths.js";
+import { VERSION } from "./version.js";
 
-function main(argv: string[]): void {
-  const cmd = argv[2];
-  if (cmd === "--version" || cmd === "-v") {
-    console.log(VERSION);
-    return;
-  }
-  console.log("synchub-agent — commands land in Phase 4. Try --version.");
+export interface CliDeps {
+  pairRedeem: typeof import("./api.js").pairRedeem;
+  saveConfig: typeof import("./config.js").saveConfig;
+  loadConfig: typeof import("./config.js").loadConfig;
+  log: (msg: string) => void;
 }
 
-main(process.argv);
+const USAGE = [
+  "SyncHub Agent",
+  "",
+  "Usage:",
+  "  synchub-agent pair <CODE> <hubUrl> [--label <name>]   Register this machine",
+  "  synchub-agent run                                     Start syncing",
+  "  synchub-agent status                                  Show pairing status",
+  "  synchub-agent --version                               Print the agent version",
+].join("\n");
+
+/** Register this machine with the Hub using a pairing code. */
+export async function cmdPair(args: string[], deps: CliDeps): Promise<number> {
+  const positional: string[] = [];
+  let label: string | undefined;
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === "--label") {
+      label = args[i + 1];
+      i += 1;
+    } else {
+      positional.push(args[i]);
+    }
+  }
+
+  const code = positional[0];
+  const rawHubUrl = positional[1] ?? process.env.SYNCHUB_HUB;
+  const hubUrl = rawHubUrl?.replace(/\/$/, "");
+
+  if (!code || !hubUrl) {
+    deps.log("usage: synchub-agent pair <CODE> <hubUrl> [--label <name>]");
+    return 1;
+  }
+
+  const info = {
+    name: os.hostname(),
+    os: process.platform,
+    os_version: os.release(),
+    agent_version: VERSION,
+    ...(label ? { label } : {}),
+  };
+
+  const result = await deps.pairRedeem(hubUrl, code, info);
+  if (!result.ok) {
+    const detail = result.status !== undefined ? `${result.kind} (status ${result.status})` : result.kind;
+    deps.log(`Pair failed: ${detail}`);
+    return 1;
+  }
+
+  deps.saveConfig({ hubUrl, machineToken: result.data.machineToken, machineId: result.data.machineId });
+  deps.log(`Paired — config saved to ${configPath()}`);
+  return 0;
+}
+
+/** Print whether this machine is currently paired with a Hub. */
+export function cmdStatus(deps: Pick<CliDeps, "loadConfig" | "log">): number {
+  const cfg = deps.loadConfig();
+  if (cfg) {
+    deps.log(`Paired to ${cfg.hubUrl} as machine #${cfg.machineId}`);
+  } else {
+    deps.log("Not paired — run: synchub-agent pair <CODE> <HUB_URL>");
+  }
+  return 0;
+}
+
+/** Print the agent version (sourced from package.json, never hardcoded). */
+export function cmdVersion(deps: Pick<CliDeps, "log">): number {
+  deps.log(VERSION);
+  return 0;
+}
+
+/** Stub for the sync engine — the real loop lands in Phase 4b. */
+export function cmdRun(deps: Pick<CliDeps, "loadConfig" | "log">): number {
+  const cfg = deps.loadConfig();
+  if (!cfg) {
+    deps.log(`Not paired — run: synchub-agent pair <CODE> <HUB_URL> (config expected at ${configPath()})`);
+    return 1;
+  }
+  deps.log("sync engine lands in Phase 4b");
+  return 0;
+}
+
+const defaultDeps: CliDeps = {
+  pairRedeem,
+  saveConfig: saveConfigImpl,
+  loadConfig: loadConfigImpl,
+  log: (msg: string) => console.log(msg),
+};
+
+export async function main(argv: string[], deps: CliDeps = defaultDeps): Promise<number> {
+  const [cmd, ...rest] = argv.slice(2);
+
+  switch (cmd) {
+    case "pair":
+      return cmdPair(rest, deps);
+    case "run":
+      return cmdRun(deps);
+    case "status":
+      return cmdStatus(deps);
+    case "--version":
+    case "-v":
+      return cmdVersion(deps);
+    default:
+      deps.log(USAGE);
+      return cmd === undefined ? 0 : 1;
+  }
+}
+
+// Only run when executed directly (not when imported by tests).
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main(process.argv).then((code) => {
+    if (code) process.exitCode = code;
+  });
+}
