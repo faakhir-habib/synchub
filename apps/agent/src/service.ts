@@ -50,7 +50,7 @@ function systemdUnitContent(deps: Pick<ServiceDeps, "selfPath" | "configPath">):
     "",
     "[Service]",
     "Type=simple",
-    `ExecStart=${deps.selfPath} run`,
+    `ExecStart=${deps.selfPath} run --service`,
     `Environment=SYNCHUB_CONFIG=${deps.configPath}`,
     "Restart=on-failure",
     "RestartSec=5",
@@ -74,6 +74,7 @@ function launchdPlistContent(deps: Pick<ServiceDeps, "selfPath" | "configPath">)
     "  <array>",
     `    <string>${deps.selfPath}</string>`,
     "    <string>run</string>",
+    "    <string>--service</string>",
     "  </array>",
     "  <key>RunAtLoad</key>",
     "  <true/>",
@@ -296,14 +297,20 @@ function statusDarwin(deps: ServiceDeps): ServiceStatus {
  *   2. At trigger time Task Scheduler resolves the first token of the stored
  *      string as the executable (here: `cmd`, found via PATH) and passes the
  *      rest verbatim as its argument string, so cmd.exe itself parses the
- *      `set "..." && "..." run` — exactly the shell semantics we want.
+ *      `set "..." && "..." run --service` — exactly the shell semantics we
+ *      want.
  *
  * `set "VAR=value"` (quotes wrapping the whole `VAR=value`, not just value)
  * is the standard cmd.exe idiom for setting an env var to a value containing
  * spaces without the quotes ending up IN the value.
+ *
+ * `run --service`, not plain `run`: the task is registered (and started) at
+ * install time, which may run before the user has paired this machine —
+ * `--service` makes `run` wait for `synchub-agent pair` instead of exiting,
+ * so the boot-time service never needs a restart once pairing happens.
  */
 function windowsTaskRunCommand(deps: Pick<ServiceDeps, "selfPath" | "configPath">): string {
-  return `cmd /c set "SYNCHUB_CONFIG=${deps.configPath}" && "${deps.selfPath}" run`;
+  return `cmd /c set "SYNCHUB_CONFIG=${deps.configPath}" && "${deps.selfPath}" run --service`;
 }
 
 function installWindows(deps: ServiceDeps): number {
