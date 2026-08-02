@@ -1,0 +1,45 @@
+# Dependencies (reinstalled in the builder stage)
+**/node_modules/
+
+# Build output (rebuilt in the builder stage)
+**/dist/
+**/build/
+apps/**/dist/
+packages/**/dist/
+
+# Local databases / runtime data
+*.db
+*.db-journal
+*.sqlite
+*.sqlite-*
+apps/hub-api/shadow.db
+apps/hub-api/prisma/*.db
+apps/hub-api/data/
+
+# Env / secrets (compose passes these in explicitly)
+.env
+.env.*
+!.env.example
+
+# VCS / editor / OS cruft
+.git/
+.github/
+.gitignore
+.gitattributes
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
+.turbo/
+
+# Legacy stacks not used by this image (root-anchored: do NOT match the
+# workspace package at apps/agent/, which is unrelated new-architecture code).
+# The legacy root agent/ has been deleted (superseded by apps/agent); /hub/
+# stays since untracked runtime leftovers (hub/data/, hub/node_modules/) can
+# still exist locally and aren't covered by the **/node_modules/ rule above.
+/hub/
+
+# Docs
+docs/
+README.md

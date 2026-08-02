@@ -11,10 +11,6 @@ node_modules/
 *.sqlite-*
 *.db
 
-# Agent runtime config/state
-/agent/config.json
-/agent/state/
-
 # OS / editor
 .DS_Store
 Thumbs.db
@@ -24,6 +20,11 @@ dist/
 build/
 out/
 
-# Agent optional electron
-/agent/electron/node_modules/
-/agent/electron/icon.png
+# monorepo
+node_modules/
+dist/
+apps/**/dist/
+packages/**/dist/
+apps/hub-web/dist/
+apps/hub-api/prisma/*.db
+.turbo/

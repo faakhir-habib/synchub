@@ -1,0 +1,54 @@
+# SyncHub Agent — systemd unit (canonical reference template)
+#
+# This is the checked-in reference for the systemd unit that
+# `synchub-agent install` generates automatically at runtime (see
+# apps/agent/src/service.ts). Use this file for manual/custom setups; most
+# users should just run `synchub-agent install` instead.
+#
+# ExecStart points at the SEA (Single Executable Application) binary
+# directly — there is no `node` in the command. Adjust the path to wherever
+# you actually placed the binary (installed by apps/agent/install/install.sh
+# to /usr/local/bin/synchub-agent by default).
+#
+# --- Option (a): system-wide service (this file, as-is) ---------------------
+#   Runs independently of any logged-in user, as a dedicated `synchub` user.
+#     sudo useradd --system --no-create-home synchub   # if it doesn't exist
+#     sudo mkdir -p /etc/synchub && sudo chown synchub:synchub /etc/synchub
+#     # pair once as the synchub user so its config.json lands correctly:
+#     sudo -u synchub SYNCHUB_CONFIG=/etc/synchub/config.json \
+#       synchub-agent pair <CODE> <HUB_URL>
+#     sudo cp synchub-agent.service /etc/systemd/system/synchub-agent.service
+#     sudo systemctl daemon-reload
+#     sudo systemctl enable --now synchub-agent
+#     sudo systemctl status synchub-agent
+#
+# --- Option (b): per-user service (what `synchub-agent install` registers) --
+#   Runs only while the user's systemd instance is up (no sudo required).
+#   Remove the `User=`/`Group=` lines below, change
+#   `WantedBy=multi-user.target` to `WantedBy=default.target`, and use the
+#   default per-user config path (~/.synchub/config.json, i.e. you can drop
+#   the `Environment=SYNCHUB_CONFIG=...` line too — or point it wherever you
+#   keep the config):
+#     mkdir -p ~/.config/systemd/user
+#     cp synchub-agent.service ~/.config/systemd/user/synchub-agent.service
+#     systemctl --user daemon-reload
+#     systemctl --user enable --now synchub-agent
+#     systemctl --user status synchub-agent
+#   (`synchub-agent install` on Linux always registers this per-user variant.)
+
+[Unit]
+Description=SyncHub Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=synchub
+Group=synchub
+ExecStart=/opt/synchub/synchub-agent run
+Environment=SYNCHUB_CONFIG=/etc/synchub/config.json
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
