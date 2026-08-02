@@ -6,6 +6,13 @@ import { pairRedeem } from "./api.js";
 import { runAgent as runAgentImpl } from "./agent.js";
 import { loadConfig as loadConfigImpl, saveConfig as saveConfigImpl } from "./config.js";
 import { configPath } from "./paths.js";
+import {
+  defaultServiceDeps,
+  installService as installServiceImpl,
+  serviceStatus as serviceStatusImpl,
+  uninstallService as uninstallServiceImpl,
+} from "./service.js";
+import type { ServiceStatus } from "./service.js";
 import { VERSION } from "./version.js";
 
 export interface CliDeps {
@@ -13,6 +20,9 @@ export interface CliDeps {
   saveConfig: typeof import("./config.js").saveConfig;
   loadConfig: typeof import("./config.js").loadConfig;
   runAgent: typeof import("./agent.js").runAgent;
+  installService: () => number;
+  uninstallService: () => number;
+  serviceStatus: () => ServiceStatus;
   log: (msg: string) => void;
 }
 
@@ -23,6 +33,8 @@ const USAGE = [
   "  synchub-agent pair <CODE> <hubUrl> [--label <name>]   Register this machine",
   "  synchub-agent run                                     Start syncing",
   "  synchub-agent status                                  Show pairing status",
+  "  synchub-agent install                                 Register as an OS service (start on boot)",
+  "  synchub-agent uninstall                               Remove the OS service",
   "  synchub-agent --version                               Print the agent version",
 ].join("\n");
 
@@ -68,15 +80,29 @@ export async function cmdPair(args: string[], deps: CliDeps): Promise<number> {
   return 0;
 }
 
-/** Print whether this machine is currently paired with a Hub. */
-export function cmdStatus(deps: Pick<CliDeps, "loadConfig" | "log">): number {
+/** Print whether this machine is currently paired with a Hub, and OS service state. */
+export function cmdStatus(deps: Pick<CliDeps, "loadConfig" | "log" | "serviceStatus">): number {
   const cfg = deps.loadConfig();
   if (cfg) {
     deps.log(`Paired to ${cfg.hubUrl} as machine #${cfg.machineId}`);
   } else {
     deps.log("Not paired — run: synchub-agent pair <CODE> <HUB_URL>");
   }
+
+  const svc = deps.serviceStatus();
+  deps.log(svc.installed ? `Service: installed, ${svc.running ? "running" : "not running"}` : "Service: not installed");
+
   return 0;
+}
+
+/** Register this agent as an OS background service (systemd/launchd/Scheduled Task). */
+export function cmdInstall(deps: Pick<CliDeps, "installService">): number {
+  return deps.installService();
+}
+
+/** Stop and remove the OS background service registered by `install`. */
+export function cmdUninstall(deps: Pick<CliDeps, "uninstallService">): number {
+  return deps.uninstallService();
 }
 
 /** Print the agent version (sourced from package.json, never hardcoded). */
@@ -136,12 +162,17 @@ export async function cmdRun(deps: Pick<CliDeps, "loadConfig" | "log" | "runAgen
   return 0;
 }
 
+const defaultLog = (msg: string): void => console.log(msg);
+
 const defaultDeps: CliDeps = {
   pairRedeem,
   saveConfig: saveConfigImpl,
   loadConfig: loadConfigImpl,
   runAgent: runAgentImpl,
-  log: (msg: string) => console.log(msg),
+  installService: () => installServiceImpl(defaultServiceDeps(defaultLog)),
+  uninstallService: () => uninstallServiceImpl(defaultServiceDeps(defaultLog)),
+  serviceStatus: () => serviceStatusImpl(defaultServiceDeps(defaultLog)),
+  log: defaultLog,
 };
 
 export async function main(argv: string[], deps: CliDeps = defaultDeps): Promise<number> {
@@ -154,6 +185,10 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps): Promise
       return cmdRun(deps);
     case "status":
       return cmdStatus(deps);
+    case "install":
+      return cmdInstall(deps);
+    case "uninstall":
+      return cmdUninstall(deps);
     case "--version":
     case "-v":
       return cmdVersion(deps);
