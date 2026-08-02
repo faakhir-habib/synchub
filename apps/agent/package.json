@@ -10,9 +10,14 @@
     "start": "node dist/cli.js",
     "test": "vitest run --passWithNoTests"
   },
-  "dependencies": { "@synchub/shared": "workspace:*", "zod": "^3.24.1" },
+  "dependencies": {
+    "@synchub/shared": "workspace:*",
+    "node-notifier": "^10.0.1",
+    "zod": "^3.24.1"
+  },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "@types/node-notifier": "^8.0.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
