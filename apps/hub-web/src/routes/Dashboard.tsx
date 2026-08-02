@@ -122,7 +122,7 @@ export function Dashboard() {
             ) : (
               // Cap the card height so a long feed scrolls internally instead
               // of stretching the whole page; shows all fetched events.
-              <div className="max-h-[28rem] overflow-y-auto">
+              <div className="scroll-themed max-h-[28rem] overflow-y-auto">
                 <ActivityFeed events={activity.data} isLoading={activity.isPending} />
               </div>
             )}

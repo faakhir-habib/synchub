@@ -112,3 +112,37 @@
     letter-spacing: -0.02em;
   }
 }
+
+@layer utilities {
+  /* Theme-aware thin scrollbar (light + dark) — replaces the jarring native
+     OS scrollbar on internally-scrolling cards (e.g. the activity feed). */
+  .scroll-themed {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent;
+  }
+  .scroll-themed::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .scroll-themed::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scroll-themed::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.35);
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  .scroll-themed:hover::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.55);
+  }
+  /* Kill the native up/down arrow buttons + corner. */
+  .scroll-themed::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+  .scroll-themed::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}

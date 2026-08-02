@@ -378,7 +378,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           </CardHeader>
           <CardContent className="pt-0">
             {/* Capped height + internal scroll so a long feed doesn't grow the page. */}
-            <div className="max-h-[28rem] overflow-y-auto">
+            <div className="scroll-themed max-h-[28rem] overflow-y-auto">
               <ActivityFeed events={data.activity as ActivityEvent[]} />
             </div>
           </CardContent>
