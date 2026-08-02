@@ -7,14 +7,15 @@ built-in `node:sqlite`), so the image is small and portable.
 ## Docker (local / any host)
 
 ```bash
-# Build
-docker build -t synchub-hub ./hub
+# Build (context is the repo root; the Dockerfile lives in apps/hub-api)
+docker build -t synchub -f apps/hub-api/Dockerfile .
 
 # Run (data persists in the named volume)
-docker run -d --name synchub-hub -p 8080:8080 -v synchub-data:/data \
-  --restart unless-stopped synchub-hub
+docker run -d --name synchub -p 8080:8080 -v synchub-data:/data \
+  -e DATABASE_URL="file:/data/synchub.db" -e RELAY_STORE_DIR="/data/relay-store" \
+  --restart unless-stopped synchub
 
-# or with compose (from repo root)
+# or with compose (from repo root) — env is set for you in docker-compose.yml
 docker compose up -d --build
 ```
 
@@ -34,13 +35,15 @@ pnpm --filter @synchub/agent test
 
 1. **New Resource → Application → Docker / Dockerfile** (or "Docker Compose"
    and point at the repo's `docker-compose.yml`).
-2. **Source:** the `faakhir-habib/synchub` repo. **Build context / Dockerfile:**
-   `hub/` and `hub/Dockerfile`.
+2. **Source:** the `faakhir-habib/synchub` repo. **Build context:** the repo
+   root (`.`). **Dockerfile:** `apps/hub-api/Dockerfile`.
 3. **Port:** `8080` (Coolify maps it behind the Cloudflare tunnel → HTTPS/wss).
 4. **Persistent storage:** mount a volume at **`/data`** (holds the SQLite DB +
    relay store — do not lose this).
-5. **Env (optional):** `PORT=8080`. `DB_PATH` / `RELAY_STORE_DIR` already point
-   into `/data` via the Dockerfile.
+5. **Env:** `PORT=8080`, `DATABASE_URL=file:/data/synchub.db`,
+   `RELAY_STORE_DIR=/data/relay-store` (all preset in `docker-compose.yml`; set
+   them explicitly if deploying the raw Dockerfile). `WEB_DIST_DIR` is baked
+   into the image.
 6. Deploy. Verify the tunnel forwards **WebSocket upgrades** to `/ws/agent` and
    `/ws/user` (Cloudflare does by default; confirm no buffering/timeout).
 
