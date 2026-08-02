@@ -3,6 +3,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 import { pairRedeem } from "./api.js";
+import { runAgent as runAgentImpl } from "./agent.js";
 import { loadConfig as loadConfigImpl, saveConfig as saveConfigImpl } from "./config.js";
 import { configPath } from "./paths.js";
 import { VERSION } from "./version.js";
@@ -11,6 +12,7 @@ export interface CliDeps {
   pairRedeem: typeof import("./api.js").pairRedeem;
   saveConfig: typeof import("./config.js").saveConfig;
   loadConfig: typeof import("./config.js").loadConfig;
+  runAgent: typeof import("./agent.js").runAgent;
   log: (msg: string) => void;
 }
 
@@ -83,14 +85,39 @@ export function cmdVersion(deps: Pick<CliDeps, "log">): number {
   return 0;
 }
 
-/** Stub for the sync engine — the real loop lands in Phase 4b. */
-export function cmdRun(deps: Pick<CliDeps, "loadConfig" | "log">): number {
+/**
+ * Start the sync engine: boot the agent (reconcile, watch, connect WS) and
+ * keep running until SIGINT/SIGTERM. Returns 1 immediately if unpaired.
+ *
+ * Deliberately does NOT block on a never-resolving promise to stay alive —
+ * the agent's own live handles (the open WS socket, the chokidar watchers)
+ * are real OS handles that keep Node's event loop alive on their own, so
+ * resolving here (once boot is wired up) is enough. SIGINT/SIGTERM call
+ * `handle.stop()` (closing those handles) and then exit explicitly.
+ */
+export async function cmdRun(deps: Pick<CliDeps, "loadConfig" | "log" | "runAgent">): Promise<number> {
   const cfg = deps.loadConfig();
   if (!cfg) {
     deps.log(`Not paired — run: synchub-agent pair <CODE> <HUB_URL> (config expected at ${configPath()})`);
     return 1;
   }
-  deps.log("sync engine lands in Phase 4b");
+
+  const handle = deps.runAgent(cfg, { log: deps.log });
+
+  let stopping = false;
+  const shutdown = (): void => {
+    if (stopping) return;
+    stopping = true;
+    deps.log("shutting down...");
+    handle
+      .stop()
+      .catch((err: unknown) => deps.log(`error during shutdown: ${String(err)}`))
+      .finally(() => process.exit(0));
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+
+  deps.log("Agent running — Ctrl-C to stop");
   return 0;
 }
 
@@ -98,6 +125,7 @@ const defaultDeps: CliDeps = {
   pairRedeem,
   saveConfig: saveConfigImpl,
   loadConfig: loadConfigImpl,
+  runAgent: runAgentImpl,
   log: (msg: string) => console.log(msg),
 };
 
