@@ -132,6 +132,13 @@ function stateFile(): string {
   return join(TEST_ROOT, `state-${stateCounter}.json`);
 }
 
+let tombstoneCounter = 0;
+/** Fresh temp tombstone-store path per call, so tests never touch the real default `~/.synchub/tombstones.json`. */
+function tombstoneFile(): string {
+  tombstoneCounter += 1;
+  return join(TEST_ROOT, `tombstones-${tombstoneCounter}.json`);
+}
+
 beforeAll(async () => {
   await rm(TEST_ROOT, { recursive: true, force: true });
   await mkdir(dirname(DB_PATH), { recursive: true });
@@ -284,7 +291,7 @@ describe("agent <-> hub-api end-to-end (real server, real pairing, real wire con
     const content = '{"seq":1,"timestamp":100}\n{"seq":2,"timestamp":200}\n';
     await writeFile(join(LOCAL_A, "session.jsonl"), content, "utf8");
 
-    const handle = runAgent(cfgA, { statePath: stateFile() });
+    const handle = runAgent(cfgA, { statePath: stateFile(), tombstonePath: tombstoneFile() });
     try {
       await waitFor(
         async () => {
@@ -302,7 +309,7 @@ describe("agent <-> hub-api end-to-end (real server, real pairing, real wire con
 
   it("hub -> agent live pull via WS 'changed': a file pushed by a SECOND machine is pulled down live", async () => {
     const logs: string[] = [];
-    const handle = runAgent(cfgA, { statePath: stateFile(), log: (m) => logs.push(m) });
+    const handle = runAgent(cfgA, { statePath: stateFile(), tombstonePath: tombstoneFile(), log: (m) => logs.push(m) });
     try {
       await handle.whenIdle();
       await waitFor(() => Promise.resolve(logs.some((l) => l.includes("ws connected"))), {
@@ -328,10 +335,12 @@ describe("agent <-> hub-api end-to-end (real server, real pairing, real wire con
     }
   }, 30000);
 
-  it("local delete -> hub removal, with no resurrection on the next reconcile", async () => {
+  it("local delete -> hub removal, with no resurrection on the next reconcile, and the tombstone survives an agent restart", async () => {
     const logs: string[] = [];
+    const sp = stateFile();
+    const tp = tombstoneFile();
     // Short tick so a periodic auto-reconcile actually runs within the test window.
-    const handle = runAgent(cfgA, { statePath: stateFile(), log: (m) => logs.push(m), tickMs: 500 });
+    const handle = runAgent(cfgA, { statePath: sp, tombstonePath: tp, log: (m) => logs.push(m), tickMs: 500 });
     try {
       await handle.whenIdle();
       await waitFor(() => Promise.resolve(logs.some((l) => l.includes("ws connected"))), {
@@ -349,6 +358,19 @@ describe("agent <-> hub-api end-to-end (real server, real pairing, real wire con
         { timeoutMs: 20000, message: "session.jsonl's file_state was never removed on the Hub after local delete" },
       );
 
+      // Durability check: the tombstone was persisted to the on-disk store
+      // (not just held in memory) as soon as the local unlink was observed
+      // — this is the fix's core guarantee (audit #5).
+      await waitFor(
+        async () => {
+          const raw = await readFile(tp, "utf8").catch(() => null);
+          if (raw === null) return false;
+          const keys: unknown = JSON.parse(raw);
+          return Array.isArray(keys) && keys.includes(`${projectAuto.id}/session.jsonl`);
+        },
+        { timeoutMs: 5000, message: "the tombstone for session.jsonl was never persisted to the tombstone store file" },
+      );
+
       // Let at least a couple more periodic reconciles run and confirm the
       // tombstone holds: the Hub manifest staying caught-up must not
       // resurrect the file back onto localA.
@@ -360,14 +382,32 @@ describe("agent <-> hub-api end-to-end (real server, real pairing, real wire con
     } finally {
       await handle.stop();
     }
-  }, 30000);
+
+    // Restart: a brand-new runAgent instance (fresh in-memory
+    // TombstoneStore, loaded from the SAME on-disk state+tombstone files —
+    // simulating the agent process being killed and relaunched) must still
+    // not resurrect session.jsonl locally. This is exactly the scenario the
+    // old in-memory-only `Set<string>` tombstone could not survive.
+    const logs2: string[] = [];
+    const handle2 = runAgent(cfgA, { statePath: sp, tombstonePath: tp, log: (m) => logs2.push(m), tickMs: 500 });
+    try {
+      await handle2.whenIdle();
+      await sleep(1000);
+      expect(existsSync(join(LOCAL_A, "session.jsonl"))).toBe(false);
+      const man = await apiA.getManifest(projectAuto.id);
+      expect(man.ok).toBe(true);
+      if (man.ok) expect(man.data.some((f) => f.filename === "session.jsonl")).toBe(false);
+    } finally {
+      await handle2.stop();
+    }
+  }, 45000);
 
   it("sync-trigger reconciles a manual-mode project (not auto-pushed on boot, but IS pushed on an explicit sync-now)", async () => {
     const content = '{"seq":1,"timestamp":100}\n';
     await writeFile(join(LOCAL_B, "manual.jsonl"), content, "utf8");
 
     const logs: string[] = [];
-    const handle = runAgent(cfgA, { statePath: stateFile(), log: (m) => logs.push(m) });
+    const handle = runAgent(cfgA, { statePath: stateFile(), tombstonePath: tombstoneFile(), log: (m) => logs.push(m) });
     try {
       await handle.whenIdle();
       await waitFor(() => Promise.resolve(logs.some((l) => l.includes("ws connected"))), {

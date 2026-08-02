@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+﻿import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import type { AgentMapping } from "@synchub/shared";
 import type { Api } from "./api.js";
 import type { AgentState } from "./state.js";
+import type { TombstoneStore } from "./tombstones.js";
 import type { AgentConfig } from "./config.js";
 import { SyncQueue } from "./sync-queue.js";
 import { runAgent } from "./agent.js";
@@ -74,6 +75,29 @@ function makeState(overrides: Partial<AgentState> = {}): AgentState {
   } as unknown as AgentState;
 }
 
+/**
+ * A minimal in-memory TombstoneStore fake, injected via `tombstoneFactory`
+ * in every test below so runAgent never touches the real default
+ * `~/.synchub/tombstones.json` (persistence itself is covered by
+ * tombstones.test.ts).
+ */
+function makeTombstones(overrides: Partial<TombstoneStore> = {}): TombstoneStore {
+  const set = new Set<string>();
+  return {
+    has: vi.fn((key: string) => set.has(key)),
+    add: vi.fn((key: string) => {
+      set.add(key);
+    }),
+    delete: vi.fn((key: string) => {
+      set.delete(key);
+    }),
+    list: vi.fn(() => [...set]),
+    flush: vi.fn(),
+    close: vi.fn(),
+    ...overrides,
+  } as unknown as TombstoneStore;
+}
+
 const cfg: AgentConfig = { hubUrl: "http://hub", machineToken: "tok", machineId: 1 };
 
 describe("runAgent", () => {
@@ -107,6 +131,7 @@ describe("runAgent", () => {
       getManifest: vi.fn(async () => ({ ok: true, data: [] })),
     });
     const state = makeState();
+    const tombstones = makeTombstones();
     const sockets: ReturnType<typeof makeFakeWs>[] = [];
     const wsFactory: WsFactory = () => {
       const s = makeFakeWs();
@@ -125,6 +150,7 @@ describe("runAgent", () => {
       notify,
       apiFactory: () => api,
       stateFactory: () => state,
+      tombstoneFactory: () => tombstones,
       watcherFactory,
       wsFactory,
     });
@@ -153,6 +179,7 @@ describe("runAgent", () => {
       pull: vi.fn(async () => "hub-content"),
     });
     const state = makeState();
+    const tombstones = makeTombstones();
     const sockets: ReturnType<typeof makeFakeWs>[] = [];
     const wsFactory: WsFactory = () => {
       const s = makeFakeWs();
@@ -165,6 +192,7 @@ describe("runAgent", () => {
       notify,
       apiFactory: () => api,
       stateFactory: () => state,
+      tombstoneFactory: () => tombstones,
       watcherFactory: () => makeFakeWatcher(),
       wsFactory,
     });
@@ -183,6 +211,7 @@ describe("runAgent", () => {
 
   it("a changed message for an unmapped project is skipped (no crash, no enqueue work)", async () => {
     const api = makeApi({ getMappings: vi.fn(async () => ({ ok: true, data: [] })) });
+    const tombstones = makeTombstones();
     const sockets: ReturnType<typeof makeFakeWs>[] = [];
     const wsFactory: WsFactory = () => {
       const s = makeFakeWs();
@@ -195,6 +224,7 @@ describe("runAgent", () => {
       notify,
       apiFactory: () => api,
       stateFactory: () => makeState(),
+      tombstoneFactory: () => tombstones,
       watcherFactory: () => makeFakeWatcher(),
       wsFactory,
     });
@@ -220,6 +250,7 @@ describe("runAgent", () => {
       getMappings: vi.fn(async () => ({ ok: true, data: [m] })),
       getManifest: vi.fn(async () => ({ ok: true, data: [] })),
     });
+    const tombstones = makeTombstones();
     const sockets: ReturnType<typeof makeFakeWs>[] = [];
     const wsFactory: WsFactory = () => {
       const s = makeFakeWs();
@@ -232,6 +263,7 @@ describe("runAgent", () => {
       notify,
       apiFactory: () => api,
       stateFactory: () => makeState(),
+      tombstoneFactory: () => tombstones,
       watcherFactory: () => makeFakeWatcher(),
       wsFactory,
     });
@@ -254,6 +286,7 @@ describe("runAgent", () => {
     const m = mapping({ project_id: 5, local_path: dir, sync_mode: "auto" });
     const api = makeApi({ getMappings: vi.fn(async () => ({ ok: true, data: [m] })) });
     const state = makeState();
+    const tombstones = makeTombstones();
     const sockets: ReturnType<typeof makeFakeWs>[] = [];
     const wsFactory: WsFactory = () => {
       const s = makeFakeWs();
@@ -266,6 +299,7 @@ describe("runAgent", () => {
       notify,
       apiFactory: () => api,
       stateFactory: () => state,
+      tombstoneFactory: () => tombstones,
       watcherFactory: () => makeFakeWatcher(),
       wsFactory,
     });
@@ -274,6 +308,13 @@ describe("runAgent", () => {
     expect(existsSync(join(dir, "gone.jsonl"))).toBe(true);
 
     sockets[0]!.emit("message", JSON.stringify({ type: "deleted", projectId: 5, filename: "gone.jsonl" }));
+
+    // Eager: the tombstone must be present the instant the WS "deleted"
+    // frame is dispatched, synchronously, before the enqueued delete job
+    // has had any chance to run — proving the durable intent survives
+    // even if that job is later abandoned (audit #5).
+    expect(tombstones.has("5/gone.jsonl")).toBe(true);
+
     await handle.whenIdle();
 
     expect(existsSync(join(dir, "gone.jsonl"))).toBe(false);
@@ -282,11 +323,12 @@ describe("runAgent", () => {
     await handle.stop();
   });
 
-  it("a deleted message with an unsafe (path-traversal) filename is skipped: no unlink, no state.del", async () => {
+  it("a deleted message with an unsafe (path-traversal) filename is skipped: no unlink, no state.del, no tombstone", async () => {
     const dir = tmpDir();
     const m = mapping({ project_id: 5, local_path: dir, sync_mode: "auto" });
     const api = makeApi({ getMappings: vi.fn(async () => ({ ok: true, data: [m] })) });
     const state = makeState();
+    const tombstones = makeTombstones();
     const sockets: ReturnType<typeof makeFakeWs>[] = [];
     const wsFactory: WsFactory = () => {
       const s = makeFakeWs();
@@ -299,6 +341,7 @@ describe("runAgent", () => {
       notify,
       apiFactory: () => api,
       stateFactory: () => state,
+      tombstoneFactory: () => tombstones,
       watcherFactory: () => makeFakeWatcher(),
       wsFactory,
     });
@@ -312,6 +355,7 @@ describe("runAgent", () => {
     await handle.whenIdle();
 
     expect(state.del).not.toHaveBeenCalled();
+    expect(tombstones.has("5/../evil.jsonl")).toBe(false);
     expect(log).toHaveBeenCalledWith(expect.stringMatching(/unsafe|traversal|skip/i));
 
     await handle.stop();
@@ -324,6 +368,7 @@ describe("runAgent", () => {
       getMappings: vi.fn(async () => ({ ok: true, data: [m] })),
       getManifest: vi.fn(async () => ({ ok: true, data: [] })),
     });
+    const tombstones = makeTombstones();
     const sockets: ReturnType<typeof makeFakeWs>[] = [];
     const wsFactory: WsFactory = () => {
       const s = makeFakeWs();
@@ -336,6 +381,7 @@ describe("runAgent", () => {
       notify,
       apiFactory: () => api,
       stateFactory: () => makeState(),
+      tombstoneFactory: () => tombstones,
       watcherFactory: () => makeFakeWatcher(),
       wsFactory,
     });
@@ -371,12 +417,14 @@ describe("runAgent", () => {
         watchers.push(w);
         return w;
       };
+      const tombstones = makeTombstones();
 
       const handle = runAgent(cfg, {
         log,
         notify,
         apiFactory: () => api,
         stateFactory: () => makeState(),
+        tombstoneFactory: () => tombstones,
         watcherFactory,
         wsFactory: () => makeFakeWs(),
         tickMs: 30000,
@@ -417,12 +465,14 @@ describe("runAgent", () => {
         watchers.push(w);
         return w;
       };
+      const tombstones = makeTombstones();
 
       const handle = runAgent(cfg, {
         log,
         notify,
         apiFactory: () => api,
         stateFactory: () => makeState(),
+        tombstoneFactory: () => tombstones,
         watcherFactory,
         wsFactory: () => makeFakeWs(),
         tickMs: 30000,
@@ -447,12 +497,14 @@ describe("runAgent", () => {
     const api = makeApi({
       getMappings: vi.fn(async () => ({ ok: false, kind: "unauthorized" })),
     });
+    const tombstones = makeTombstones();
 
     const handle = runAgent(cfg, {
       log,
       notify,
       apiFactory: () => api,
       stateFactory: () => makeState(),
+      tombstoneFactory: () => tombstones,
       watcherFactory: () => makeFakeWatcher(),
       wsFactory: () => makeFakeWs(),
     });
@@ -464,7 +516,7 @@ describe("runAgent", () => {
     await handle.stop();
   });
 
-  it("stop() closes the ws, the watcher, drains+closes the queue, and closes state", async () => {
+  it("stop() closes the ws, the watcher, drains+closes the queue, closes state, and closes tombstones", async () => {
     const closeSpy = vi.spyOn(SyncQueue.prototype, "close");
     try {
       const dir = tmpDir();
@@ -474,6 +526,7 @@ describe("runAgent", () => {
         getManifest: vi.fn(async () => ({ ok: true, data: [] })),
       });
       const state = makeState();
+      const tombstones = makeTombstones();
       const sockets: ReturnType<typeof makeFakeWs>[] = [];
       const wsFactory: WsFactory = () => {
         const s = makeFakeWs();
@@ -492,6 +545,7 @@ describe("runAgent", () => {
         notify,
         apiFactory: () => api,
         stateFactory: () => state,
+        tombstoneFactory: () => tombstones,
         watcherFactory,
         wsFactory,
       });
@@ -503,6 +557,7 @@ describe("runAgent", () => {
       expect(watchers[0]!.close).toHaveBeenCalledTimes(1);
       expect(closeSpy).toHaveBeenCalledTimes(1);
       expect(state.close).toHaveBeenCalledTimes(1);
+      expect(tombstones.close).toHaveBeenCalledTimes(1);
     } finally {
       closeSpy.mockRestore();
     }

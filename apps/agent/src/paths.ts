@@ -10,3 +10,8 @@ export function configPath(): string {
 export function statePath(): string {
   return process.env.SYNCHUB_STATE ?? join(homedir(), ".synchub", "state.json");
 }
+
+/** Path to the agent's tombstone store. Read at call time so tests can override via env. */
+export function tombstonePath(): string {
+  return process.env.SYNCHUB_TOMBSTONES ?? join(homedir(), ".synchub", "tombstones.json");
+}
