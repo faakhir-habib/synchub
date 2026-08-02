@@ -164,7 +164,22 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps): Promise
 }
 
 // Only run when executed directly (not when imported by tests).
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+//
+// `import.meta.url` is how this is detected in normal ESM (dev via tsx, or
+// `node dist/cli.js`) — compare it against `process.argv[1]`, the invoked
+// script path. But esbuild's CJS output (used for the bundled/SEA build,
+// see scripts/build-sea.mjs) always empties `import.meta` (it's not
+// representable in CJS), and inside a Node SEA binary there is no script
+// file at all — `process.argv[1]` is the first *CLI argument*, not a path.
+// In both of those bundled contexts `import.meta.url` is `undefined`, and
+// the bundle is never anything other than the entry point (nothing
+// `require`s it as a library), so treat "no import.meta.url" itself as
+// "this is the entry point".
+const importMetaUrl: string | undefined = (import.meta as { url?: string }).url;
+const isEntryPoint =
+  importMetaUrl === undefined ||
+  (process.argv[1] !== undefined && fileURLToPath(importMetaUrl) === process.argv[1]);
+if (isEntryPoint) {
   main(process.argv).then((code) => {
     if (code) process.exitCode = code;
   });
