@@ -52,8 +52,26 @@ export function createTombstones(path: string = tombstonePath()): TombstoneStore
 
   function doFlush(): void {
     if (!dirty) return;
-    writeFileAtomic(path, JSON.stringify([...set]));
-    dirty = false;
+    try {
+      writeFileAtomic(path, JSON.stringify([...set]));
+      dirty = false;
+    } catch (err) {
+      // Fail-safe last resort: a transient disk-full/permission/removed-
+      // drive error must never escape a debounce-timer callback (that would
+      // crash the whole agent process, and on Windows the Scheduled-Task
+      // install has no auto-restart, so it would stay dead silently). Leave
+      // `dirty` true so a subsequent mutation's debounced flush retries the
+      // write; this module has no logger of its own, so console.error is
+      // the acceptable minimal fallback here.
+      console.error("synchub: failed to persist tombstones:", err);
+    }
+    // The pending timer (if any) has either just fired (this call came from
+    // its own callback) or was already cleared by flush()/close() before
+    // calling doFlush — either way it's spent, so always drop the
+    // reference. This must happen regardless of success/failure: otherwise,
+    // after a failed write, scheduleFlush()'s "already scheduled" guard
+    // would see a stale non-null timer and skip arming a fresh retry timer
+    // on the next mutation.
     if (timer !== null) {
       clearTimeout(timer);
       timer = null;

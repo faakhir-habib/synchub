@@ -311,6 +311,74 @@ describe("cmdRun", () => {
     clearIntervalSpy.mockRestore();
     exitSpy.mockRestore();
   });
+
+  it("installs uncaughtException/unhandledRejection handlers that log and do NOT exit the process", async () => {
+    const cfg: AgentConfig = { hubUrl: "http://hub:8080", machineToken: "tok", machineId: 7 };
+    const deps = makeDeps({ loadConfig: vi.fn(() => cfg) });
+    const setIntervalSpy = vi.spyOn(global, "setInterval");
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((): never => undefined as never));
+
+    const uncaughtBefore = process.listeners("uncaughtException");
+    const unhandledBefore = process.listeners("unhandledRejection");
+
+    await cmdRun(deps);
+
+    const uncaughtAfter = process.listeners("uncaughtException");
+    const unhandledAfter = process.listeners("unhandledRejection");
+    expect(uncaughtAfter.length).toBe(uncaughtBefore.length + 1);
+    expect(unhandledAfter.length).toBe(unhandledBefore.length + 1);
+
+    const uncaughtHandler = uncaughtAfter[uncaughtAfter.length - 1] as (err: unknown) => void;
+    const unhandledHandler = unhandledAfter[unhandledAfter.length - 1] as (err: unknown) => void;
+
+    uncaughtHandler(new Error("boom"));
+    unhandledHandler(new Error("boom2"));
+
+    expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/uncaught/i));
+    expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/unhandled/i));
+    expect(exitSpy).not.toHaveBeenCalled();
+
+    // Cleanup: don't leak these handlers into other tests.
+    process.removeListener("uncaughtException", uncaughtHandler);
+    process.removeListener("unhandledRejection", unhandledHandler);
+    for (const call of setIntervalSpy.mock.results) clearInterval(call.value as NodeJS.Timeout);
+    setIntervalSpy.mockRestore();
+    exitSpy.mockRestore();
+    captureAndCleanupShutdownListeners().cleanup();
+  });
+
+  it("removes the uncaughtException/unhandledRejection handlers on shutdown (no leak across sessions)", async () => {
+    const cfg: AgentConfig = { hubUrl: "http://hub:8080", machineToken: "tok", machineId: 7 };
+    const stop = vi.fn(async () => {});
+    const deps = makeDeps({
+      loadConfig: vi.fn(() => cfg),
+      runAgent: vi.fn(() => ({ stop, whenIdle: vi.fn(async () => {}) })),
+    });
+    const setIntervalSpy = vi.spyOn(global, "setInterval");
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((): never => undefined as never));
+
+    const uncaughtCountBefore = process.listenerCount("uncaughtException");
+    const unhandledCountBefore = process.listenerCount("unhandledRejection");
+
+    await cmdRun(deps);
+
+    expect(process.listenerCount("uncaughtException")).toBe(uncaughtCountBefore + 1);
+    expect(process.listenerCount("unhandledRejection")).toBe(unhandledCountBefore + 1);
+
+    const { shutdown, cleanup } = captureAndCleanupShutdownListeners();
+    shutdown();
+
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(process.listenerCount("uncaughtException")).toBe(uncaughtCountBefore);
+    expect(process.listenerCount("unhandledRejection")).toBe(unhandledCountBefore);
+
+    cleanup();
+    setIntervalSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
 });
 
 describe("main", () => {

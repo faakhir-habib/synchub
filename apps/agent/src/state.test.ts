@@ -179,4 +179,53 @@ describe("state batched persistence", () => {
     vi.advanceTimersByTime(1000);
     expect(mockedWrite).toHaveBeenCalledTimes(1);
   });
+
+  it("a writeFileAtomic failure during the debounced flush does not throw/crash, logs via console.error, and keeps dirty so a later successful flush persists", () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockedWrite.mockImplementationOnce(() => {
+      throw new Error("disk full");
+    });
+
+    const state = createState(stateFile);
+    state.set(1, "a.jsonl", "h1");
+
+    // The debounced flush fires and writeFileAtomic throws internally —
+    // this must not escape the timer callback.
+    expect(() => vi.advanceTimersByTime(200)).not.toThrow();
+    expect(mockedWrite).toHaveBeenCalledTimes(1);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("synchub"),
+      expect.anything(),
+    );
+
+    // dirty must have been preserved (not cleared on failure): a later
+    // mutation's debounced flush should retry the write, and this time it
+    // succeeds, persisting to disk.
+    state.set(1, "b.jsonl", "h2");
+    vi.advanceTimersByTime(200);
+    expect(mockedWrite).toHaveBeenCalledTimes(2);
+
+    const reloaded = createState(stateFile);
+    expect(reloaded.get(1, "a.jsonl")).toBe("h1");
+    expect(reloaded.get(1, "b.jsonl")).toBe("h2");
+    reloaded.close();
+
+    state.close();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("close() swallows a writeFileAtomic failure rather than throwing out of the shutdown path", () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockedWrite.mockImplementationOnce(() => {
+      throw new Error("disk full");
+    });
+
+    const state = createState(stateFile);
+    state.set(1, "a.jsonl", "h1");
+
+    expect(() => state.close()).not.toThrow();
+    expect(consoleErrorSpy).toHaveBeenCalled();
+
+    consoleErrorSpy.mockRestore();
+  });
 });
