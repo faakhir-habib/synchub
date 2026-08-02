@@ -58,10 +58,11 @@ Data (SQLite DB + relay store) persists in the `synchub-data` volume. See
 
 ## Installing the Agent (per machine)
 
-The agent ships as a single self-contained binary — no Node.js required on the
-target machine.
+The agent is a single self-contained binary — no Node.js required on the target.
+Do these steps on **every machine** whose transcripts you want to sync. Below,
+`<HUB_URL>` is your Hub, e.g. `https://synchub.mylogiclab.cloud`.
 
-**Install** — one-liner (downloads the right binary from GitHub Releases):
+### 1. Install the binary
 
 ```sh
 # macOS / Linux
@@ -73,22 +74,100 @@ curl -fsSL https://raw.githubusercontent.com/faakhir-habib/synchub/main/apps/age
 irm https://raw.githubusercontent.com/faakhir-habib/synchub/main/apps/agent/install/install.ps1 | iex
 ```
 
-Or download the `synchub-agent` binary for your OS/arch directly from the
-repo's [GitHub Releases](https://github.com/faakhir-habib/synchub/releases).
-See `apps/agent/install/README.md` for pairing-during-install env vars
-(`SYNCHUB_CODE` / `SYNCHUB_HUB`) and other options.
+The installer downloads the right binary from [GitHub Releases](https://github.com/faakhir-habib/synchub/releases),
+puts it on your `PATH`, and prints the next steps. **Open a new terminal
+afterward** so the updated `PATH` is picked up. Verify:
 
-**Pair + run:**
-
-```sh
-synchub-agent pair <CODE> <HUB_URL>   # get <CODE> from the web UI: Machines → Connect machine
-synchub-agent install                 # registers + starts the OS background service (systemd/launchd/Windows service)
-synchub-agent status                  # confirm it's running and connected
+```
+synchub-agent --version
 ```
 
-Note: the single-binary build has no bundled OS-notification backend —
-desktop (toast) notifications are best-effort/optional and silently no-op if
-unavailable; the agent syncs fine without them.
+(Prefer a manual download? Grab `synchub-agent-<os>-<arch>` from Releases and
+put it on your `PATH` yourself. `apps/agent/install/README.md` documents extra
+options like `SYNCHUB_VERSION` to pin a release.)
+
+### 2. Get a pairing code (web UI)
+
+Open `<HUB_URL>` in a browser. **First machine on a fresh Hub:** sign up.
+**Additional machines:** just log in. Then go to **Machines → Connect machine**
+and copy the pairing code.
+
+### 3. Pair this machine
+
+```
+synchub-agent pair <CODE> <HUB_URL>
+synchub-agent status                 # -> "Paired to <HUB_URL> as machine #N"
+```
+
+### 4. Choose what to sync (web UI)
+
+In the UI, create a **Project**, then **map it to this machine** with the local
+path to a Claude Code transcript folder, and set **sync mode = auto**:
+
+```
+macOS / Linux :  ~/.claude/projects/<project-folder>
+Windows       :  C:\Users\<you>\.claude\projects\<project-folder>
+```
+
+The agent watches that folder's `*.jsonl` files. One Project ↔ one folder; add
+more mappings for more folders. To sync the **same** project across machines,
+map each machine's local copy of that folder to the same Project.
+
+### 5. Test it (foreground)
+
+```
+synchub-agent run
+```
+
+You should see it push the transcripts; they appear live in the Hub's project
+view. Press `Ctrl-C` to stop, then set up the background service below.
+
+### 6. Run it in the background (boot service)
+
+**macOS / Linux:**
+
+```
+synchub-agent install                # systemd --user / launchd — starts now and on every boot
+synchub-agent status                 # -> "Service: installed, running"
+```
+
+**Windows** — `install` registers a Session-0 boot service (runs as `SYSTEM`),
+so it **must be run from an elevated (Administrator) PowerShell**:
+
+```powershell
+# In an Administrator PowerShell:
+synchub-agent install                        # registers the boot task
+Start-ScheduledTask -TaskName SyncHubAgent   # start it now (otherwise it starts at next boot)
+synchub-agent status                         # -> "Service: installed, running"
+```
+
+> **Windows notes**
+> - `install`, `uninstall`, and `Start-ScheduledTask` require an **elevated**
+>   shell (the service runs as `SYSTEM`).
+> - `synchub-agent status` in a **normal** (non-admin) shell will report
+>   *"Service: not installed"* even when it is — a non-admin process can't see a
+>   `SYSTEM` task. Check service state from an **elevated** shell.
+
+That's it — the agent now syncs continuously in the background and auto-starts
+on boot. Repeat steps 1–6 on your other machines to sync across all of them.
+
+### Uninstalling
+
+```
+synchub-agent uninstall              # removes the OS service (elevated PowerShell on Windows)
+```
+
+Then remove the binary and its config to fully clean up:
+
+```
+# binary:  macOS/Linux  /usr/local/bin/synchub-agent  (or ~/.local/bin/synchub-agent)
+#          Windows      %LOCALAPPDATA%\Programs\SyncHub\synchub-agent.exe
+# config:  ~/.synchub/   (config.json, state.json, tombstones.json)
+```
+
+**Notifications:** the single-binary build has no bundled OS-notification
+backend — desktop (toast) notifications are best-effort/optional and silently
+no-op if unavailable; the agent syncs fine without them.
 
 See `apps/agent` for the agent's source, `apps/agent/service/` for the raw OS
 service unit templates, and `apps/agent/install/` for the install scripts.
