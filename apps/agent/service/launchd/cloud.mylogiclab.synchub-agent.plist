@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  SyncHub Agent — launchd LaunchAgent (canonical reference template)
+
+  This is the checked-in reference for the plist that
+  `synchub-agent install` generates automatically at runtime (see
+  apps/agent/src/service.ts). Use this file for manual/custom setups; most
+  users should just run `synchub-agent install` instead.
+
+  ProgramArguments points at the SEA (Single Executable Application) binary
+  directly (no `/usr/local/bin/node`) — the same path works whether the
+  binary was built for Apple Silicon or Intel, since it's the agent binary
+  itself, not a Node interpreter path that differs by arch/Homebrew prefix.
+  Adjust /usr/local/bin/synchub-agent below to wherever you actually placed
+  the binary (installed there by default by
+  apps/agent/install/install.sh).
+
+  Manual install (per-user LaunchAgent — same as what `install` registers):
+    mkdir -p ~/Library/LaunchAgents
+    cp cloud.mylogiclab.synchub-agent.plist \
+      ~/Library/LaunchAgents/cloud.mylogiclab.synchub-agent.plist
+    # adjust the SYNCHUB_CONFIG path below if you didn't pair at the default
+    # location (~/.synchub/config.json)
+    launchctl load -w ~/Library/LaunchAgents/cloud.mylogiclab.synchub-agent.plist
+    launchctl list | grep cloud.mylogiclab.synchub-agent
+
+  Uninstall:
+    launchctl unload -w ~/Library/LaunchAgents/cloud.mylogiclab.synchub-agent.plist
+    rm ~/Library/LaunchAgents/cloud.mylogiclab.synchub-agent.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>cloud.mylogiclab.synchub-agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/synchub-agent</string>
+    <string>run</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SYNCHUB_CONFIG</key>
+    <string>/usr/local/etc/synchub/config.json</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/tmp/synchub-agent.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/synchub-agent.err</string>
+</dict>
+</plist>
