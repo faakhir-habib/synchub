@@ -7,16 +7,18 @@ import { ApiError } from "../lib/api-error.js";
 import { timeAgo } from "../lib/format.js";
 import { setPresence } from "../realtime/presence-store.js";
 
-const { getMachinesMock, createMachineMock, deleteMachineMock } = vi.hoisted(() => ({
+const { getMachinesMock, createMachineMock, deleteMachineMock, pairMachineMock } = vi.hoisted(() => ({
   getMachinesMock: vi.fn(),
   createMachineMock: vi.fn(),
   deleteMachineMock: vi.fn(),
+  pairMachineMock: vi.fn(),
 }));
 
 vi.mock("@/lib/endpoints", () => ({
   getMachines: getMachinesMock,
   createMachine: createMachineMock,
   deleteMachine: deleteMachineMock,
+  pairMachine: pairMachineMock,
 }));
 
 // Imported after the mock above so it picks up the mocked module.
@@ -64,6 +66,7 @@ beforeEach(() => {
   getMachinesMock.mockReset();
   createMachineMock.mockReset();
   deleteMachineMock.mockReset();
+  pairMachineMock.mockReset();
 
   // jsdom doesn't implement scrollIntoView or pointer capture — not touched
   // by this screen's Dialog/AlertDialog, but stubbed defensively per the
@@ -166,7 +169,11 @@ describe("Machines", () => {
 
     await waitFor(() => expect(screen.getByText("citadel")).toBeDefined());
 
-    fireEvent.click(screen.getByRole("button", { name: /connect machine/i }));
+    // jsdom doesn't implement PointerEvent, which is what DropdownMenuTrigger
+    // normally opens on — the keyboard path (Enter) is a real, accessible way
+    // to open it and works reliably in jsdom.
+    fireEvent.keyDown(screen.getByRole("button", { name: /connect machine/i }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /create manually/i }));
 
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText(/^name$/i), { target: { value: "new-machine" } });
@@ -185,6 +192,23 @@ describe("Machines", () => {
     );
   });
 
+  it("opens the pair-machine dialog from the connect menu and generates a code", async () => {
+    getMachinesMock.mockResolvedValue([{ ...MACHINES[0], id: 3201, name: "citadel" }]);
+    pairMachineMock.mockResolvedValue({ code: "AB12CD", expires_in: 600 });
+
+    const { ui } = wrap(<Machines />);
+    render(ui);
+
+    await waitFor(() => expect(screen.getByText("citadel")).toBeDefined());
+
+    fireEvent.keyDown(screen.getByRole("button", { name: /connect machine/i }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /pair a machine/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("AB12CD")).toBeDefined();
+    expect(pairMachineMock).toHaveBeenCalledTimes(1);
+  });
+
   it("shows an inline field error for a blank name without calling createMachine", async () => {
     getMachinesMock.mockResolvedValue([{ ...MACHINES[0], id: 3101, name: "citadel" }]);
 
@@ -193,7 +217,8 @@ describe("Machines", () => {
 
     await waitFor(() => expect(screen.getByText("citadel")).toBeDefined());
 
-    fireEvent.click(screen.getByRole("button", { name: /connect machine/i }));
+    fireEvent.keyDown(screen.getByRole("button", { name: /connect machine/i }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /create manually/i }));
     const dialog = await screen.findByRole("dialog");
 
     fireEvent.change(within(dialog).getByLabelText(/^name$/i), { target: { value: "   " } });
