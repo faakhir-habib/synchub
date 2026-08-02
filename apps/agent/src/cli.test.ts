@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { cmdPair, cmdRun, cmdStatus, cmdVersion, main } from "./cli.js";
+import { cmdInstall, cmdPair, cmdRun, cmdStatus, cmdUninstall, cmdVersion, main } from "./cli.js";
 import { VERSION } from "./version.js";
 import pkg from "../package.json" with { type: "json" };
 import type { AgentConfig } from "./config.js";
@@ -16,6 +16,9 @@ function makeDeps(overrides: Partial<Parameters<typeof cmdPair>[1]> = {}) {
       stop: vi.fn(async () => {}),
       whenIdle: vi.fn(async () => {}),
     })),
+    installService: vi.fn(() => 0),
+    uninstallService: vi.fn(() => 0),
+    serviceStatus: vi.fn(() => ({ installed: false, running: false, detail: "not installed" })),
     log: vi.fn(),
     ...overrides,
   };
@@ -112,6 +115,80 @@ describe("cmdStatus", () => {
 
     expect(code).toBe(0);
     expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/not paired/i));
+  });
+
+  it("logs 'Service: not installed' when serviceStatus reports not installed", () => {
+    const deps = makeDeps({
+      loadConfig: vi.fn(() => null),
+      serviceStatus: vi.fn(() => ({ installed: false, running: false, detail: "not installed" })),
+    });
+
+    const code = cmdStatus(deps);
+
+    expect(code).toBe(0);
+    expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/service:\s*not installed/i));
+  });
+
+  it("logs 'Service: installed, running' when serviceStatus reports installed + running", () => {
+    const deps = makeDeps({
+      loadConfig: vi.fn(() => null),
+      serviceStatus: vi.fn(() => ({ installed: true, running: true, detail: "active" })),
+    });
+
+    const code = cmdStatus(deps);
+
+    expect(code).toBe(0);
+    expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/service:\s*installed,\s*running/i));
+  });
+
+  it("logs 'Service: installed, not running' when serviceStatus reports installed but not running", () => {
+    const deps = makeDeps({
+      loadConfig: vi.fn(() => null),
+      serviceStatus: vi.fn(() => ({ installed: true, running: false, detail: "inactive" })),
+    });
+
+    const code = cmdStatus(deps);
+
+    expect(code).toBe(0);
+    expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/service:\s*installed,\s*not running/i));
+  });
+});
+
+describe("cmdInstall", () => {
+  it("delegates to installService and returns its code", () => {
+    const deps = makeDeps({ installService: vi.fn(() => 0) });
+
+    const code = cmdInstall(deps);
+
+    expect(code).toBe(0);
+    expect(deps.installService).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates a non-zero code from installService", () => {
+    const deps = makeDeps({ installService: vi.fn(() => 1) });
+
+    const code = cmdInstall(deps);
+
+    expect(code).toBe(1);
+  });
+});
+
+describe("cmdUninstall", () => {
+  it("delegates to uninstallService and returns its code", () => {
+    const deps = makeDeps({ uninstallService: vi.fn(() => 0) });
+
+    const code = cmdUninstall(deps);
+
+    expect(code).toBe(0);
+    expect(deps.uninstallService).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates a non-zero code from uninstallService", () => {
+    const deps = makeDeps({ uninstallService: vi.fn(() => 1) });
+
+    const code = cmdUninstall(deps);
+
+    expect(code).toBe(1);
   });
 });
 
@@ -262,5 +339,23 @@ describe("main", () => {
 
     expect(code).toBe(0);
     expect(deps.log).toHaveBeenCalledWith(expect.stringContaining("Usage"));
+  });
+
+  it("routes install to installService and returns its code", async () => {
+    const deps = makeDeps({ installService: vi.fn(() => 0) });
+
+    const code = await main(["node", "cli", "install"], deps);
+
+    expect(code).toBe(0);
+    expect(deps.installService).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes uninstall to uninstallService and returns its code", async () => {
+    const deps = makeDeps({ uninstallService: vi.fn(() => 0) });
+
+    const code = await main(["node", "cli", "uninstall"], deps);
+
+    expect(code).toBe(0);
+    expect(deps.uninstallService).toHaveBeenCalledTimes(1);
   });
 });
