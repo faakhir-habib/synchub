@@ -177,6 +177,10 @@ export async function cmdRun(
 
   let pollTimer: ReturnType<typeof setInterval> | undefined;
   let resolveWait: ((cfg: AgentConfig | null) => void) | undefined;
+  // Forward-declared: assigned exactly once after the optional wait-for-pairing,
+  // but read earlier inside the `shutdown` closure below — so it must be a
+  // mutable `let`, not `const` (prefer-const can't see the deferred assignment).
+  // eslint-disable-next-line prefer-const
   let handle: ReturnType<CliDeps["runAgent"]> | undefined;
   let stopping = false;
 
