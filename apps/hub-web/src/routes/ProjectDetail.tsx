@@ -115,8 +115,9 @@ interface ProjectDetailProps {
 /**
  * Project detail screen — mappings, sync controls, activity, and open
  * conflicts for a single project. Realtime already invalidates
- * `qk.project(id)` on `changed`/`sync-complete` WS frames (realtime-provider),
- * so this refetches live with no extra wiring here.
+ * `qk.project(id)` and `qk.projectConflicts(id)` on `changed`/`sync-complete`/
+ * `conflict` WS frames (realtime-provider), so this refetches live with no
+ * extra wiring here.
  */
 export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const queryClient = useQueryClient();
@@ -134,7 +135,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     enabled: validId,
   });
   const conflicts = useQuery({
-    queryKey: ["projectConflicts", projectId],
+    queryKey: qk.projectConflicts(projectId),
     queryFn: () => getProjectConflicts(projectId),
     enabled: validId,
   });

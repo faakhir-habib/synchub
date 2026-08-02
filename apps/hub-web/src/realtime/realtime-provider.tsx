@@ -35,6 +35,7 @@ function dispatch(msg: WsMessage, queryClient: QueryClient): void {
 
     case "changed":
       queryClient.invalidateQueries({ queryKey: qk.project(msg.projectId) });
+      queryClient.invalidateQueries({ queryKey: qk.projectConflicts(msg.projectId) });
       queryClient.invalidateQueries({ queryKey: qk.dashboardMetrics });
       queryClient.invalidateQueries({ queryKey: qk.activity });
       return;
@@ -46,12 +47,14 @@ function dispatch(msg: WsMessage, queryClient: QueryClient): void {
 
     case "sync-complete":
       queryClient.invalidateQueries({ queryKey: qk.project(msg.projectId) });
+      queryClient.invalidateQueries({ queryKey: qk.projectConflicts(msg.projectId) });
       queryClient.invalidateQueries({ queryKey: qk.dashboardMetrics });
       queryClient.invalidateQueries({ queryKey: qk.activity });
       return;
 
     case "conflict":
       queryClient.invalidateQueries({ queryKey: qk.conflicts });
+      queryClient.invalidateQueries({ queryKey: qk.projectConflicts(msg.projectId) });
       toast(`Conflict in ${msg.filename}`);
       return;
 

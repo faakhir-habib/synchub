@@ -136,6 +136,7 @@ describe("RealtimeProvider", () => {
 
     const calledKeys = spy.mock.calls.map((call) => call[0]?.queryKey);
     expect(calledKeys).toContainEqual(["projects", 3]);
+    expect(calledKeys).toContainEqual(["projects", 3, "conflicts"]);
     expect(calledKeys).toContainEqual(["dashboard", "metrics"]);
     expect(calledKeys).toContainEqual(["dashboard", "activity"]);
   });
@@ -175,6 +176,7 @@ describe("RealtimeProvider", () => {
 
     const calledKeys = spy.mock.calls.map((call) => call[0]?.queryKey);
     expect(calledKeys).toContainEqual(["conflicts"]);
+    expect(calledKeys).toContainEqual(["projects", 3, "conflicts"]);
     expect(toastMock).toHaveBeenCalledWith("Conflict in b.txt");
   });
 

@@ -171,7 +171,7 @@ describe("RealtimeGateway", () => {
   });
 
   it("welcomes a /ws/agent connection, marks the machine online, and broadcasts presence to the user", async () => {
-    const { token, userId } = await signup();
+    const { token } = await signup();
     const machine = await createMachine(token);
 
     const user = connect(`ws://127.0.0.1:${port}/ws/user?token=${token}`);
