@@ -123,7 +123,7 @@ export const PairRedeemResponse = z.object({
 export type PairRedeemResponse = z.infer<typeof PairRedeemResponse>;
 
 export const ProjectCreateRequest = z.object({
-  alias: z.string(),
+  alias: z.string().trim().min(1, "Enter a project alias."),
   sync_mode: SyncMode.optional(),
 });
 export type ProjectCreateRequest = z.infer<typeof ProjectCreateRequest>;

@@ -143,6 +143,26 @@ describe("Projects", () => {
     );
   });
 
+  it("shows an inline field error for a blank alias without calling createProject", async () => {
+    getProjectsMock.mockResolvedValue(PROJECTS);
+
+    const { ui } = wrap(<Projects />);
+    render(ui);
+
+    await waitFor(() => expect(screen.getByText("dotfiles")).toBeDefined());
+
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    // Alias left blank (whitespace-only also fails the shared schema's
+    // `.trim().min(1)`) — submitting should validate client-side only.
+    fireEvent.change(within(dialog).getByLabelText(/alias/i), { target: { value: "   " } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /create project/i }));
+
+    expect(await within(dialog).findByText(/enter a project alias/i)).toBeDefined();
+    expect(createProjectMock).not.toHaveBeenCalled();
+  });
+
   it("confirms delete via an AlertDialog, calls deleteProject, and invalidates the projects list", async () => {
     getProjectsMock.mockResolvedValue(PROJECTS);
     deleteProjectMock.mockResolvedValue({ ok: true });
