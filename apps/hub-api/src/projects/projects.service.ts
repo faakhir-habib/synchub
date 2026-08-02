@@ -90,7 +90,9 @@ export class ProjectsService {
       this.prisma.event.findMany({
         where: { project_id: project.id },
         orderBy: [{ created_at: "desc" }, { id: "desc" }],
-        take: 10,
+        // The UI shows this in a fixed-height, scrollable card, so return a
+        // full recent window (not just 10) — bounded to keep the payload sane.
+        take: 100,
       }),
     ]);
 
