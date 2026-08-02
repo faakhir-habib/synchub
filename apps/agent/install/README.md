@@ -7,17 +7,17 @@ and installs it. No Node.js required on the target machine.
 ## macOS / Linux
 
 ```sh
-curl -fsSL https://<host>/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/faakhir-habib/synchub/main/apps/agent/install/install.sh | sh
 ```
 
 ## Windows
 
 ```powershell
-irm https://<host>/install.ps1 | iex
+irm https://raw.githubusercontent.com/faakhir-habib/synchub/main/apps/agent/install/install.ps1 | iex
 ```
 
-`<host>` is wherever these scripts are hosted (e.g. `raw.githubusercontent.com/faakhir-habib/synchub/main/apps/agent/install`,
-or a release asset URL) — see the root README for the exact current link.
+The repo is public, so no token is needed. (Installing from a **private**
+fork? Set `SYNCHUB_TOKEN` to a GitHub token — see the table below.)
 
 ## Pairing during install
 
@@ -26,14 +26,14 @@ the **primary** way to pair during install is environment variables, not
 `install.sh <CODE> <HUB>`-style flags:
 
 ```sh
-SYNCHUB_CODE=ABC123 SYNCHUB_HUB=https://synchub.example.com \
-  curl -fsSL https://<host>/install.sh | sh
+SYNCHUB_CODE=ABC123 SYNCHUB_HUB=https://synchub.mylogiclab.cloud \
+  curl -fsSL https://raw.githubusercontent.com/faakhir-habib/synchub/main/apps/agent/install/install.sh | sh
 ```
 
 ```powershell
 $env:SYNCHUB_CODE = "ABC123"
-$env:SYNCHUB_HUB = "https://synchub.example.com"
-irm https://<host>/install.ps1 | iex
+$env:SYNCHUB_HUB = "https://synchub.mylogiclab.cloud"
+irm https://raw.githubusercontent.com/faakhir-habib/synchub/main/apps/agent/install/install.ps1 | iex
 ```
 
 If you've downloaded the script and run it locally instead of piping it,
@@ -53,6 +53,7 @@ next steps (`synchub-agent pair <CODE> <HUB_URL>`, then
 | `SYNCHUB_CODE` | both | Pairing code, used when no positional arg / `-Code` is given | (none — skips pairing) |
 | `SYNCHUB_HUB` | both | Hub URL, paired with `SYNCHUB_CODE` | (none — skips pairing) |
 | `SYNCHUB_REPO` | both | GitHub `owner/repo` to download release assets from (point at a fork) | `faakhir-habib/synchub` |
+| `SYNCHUB_TOKEN` | ps1 | GitHub token to download from a **private** repo's releases (not needed — this repo is public) | (none) |
 
 ## What the scripts do
 
