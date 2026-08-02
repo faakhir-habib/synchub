@@ -23,6 +23,7 @@ vi.mock("../auth/auth-context.js", () => ({
 // Imported after the mocks above so they pick up the mocked modules.
 import { RealtimeProvider } from "./realtime-provider.js";
 import { usePresence } from "./presence-store.js";
+import { useProjectProgress } from "./progress-store.js";
 
 /** Records url + wired handlers; test drives it via emitOpen/emitMessage/emitClose. */
 class FakeWebSocket {
@@ -66,11 +67,21 @@ function PresenceProbe({ machineId }: { machineId: number }) {
   return <span data-testid="presence">{presence ? presence.status : "unknown"}</span>;
 }
 
+function ProgressProbe({ projectId }: { projectId: number }) {
+  const progress = useProjectProgress(projectId);
+  return (
+    <span data-testid="progress">
+      {progress ? `${progress.phase}:${progress.completed}/${progress.total}` : "idle"}
+    </span>
+  );
+}
+
 function renderProvider(qc: QueryClient) {
   return render(
     <QueryClientProvider client={qc}>
       <RealtimeProvider>
         <PresenceProbe machineId={5} />
+        <ProgressProbe projectId={3} />
       </RealtimeProvider>
     </QueryClientProvider>,
   );
@@ -134,6 +145,45 @@ describe("RealtimeProvider", () => {
       });
     });
 
+    const calledKeys = spy.mock.calls.map((call) => call[0]?.queryKey);
+    expect(calledKeys).toContainEqual(["projects", 3]);
+    expect(calledKeys).toContainEqual(["projects", 3, "conflicts"]);
+    expect(calledKeys).toContainEqual(["dashboard", "metrics"]);
+    expect(calledKeys).toContainEqual(["dashboard", "activity"]);
+  });
+
+  it("updates the progress store on a sync-progress message, and clears it on sync-complete", () => {
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    renderProvider(qc);
+    spy.mockClear();
+
+    expect(screen.getByTestId("progress").textContent).toBe("idle");
+
+    act(() => {
+      latestSocket().emitMessage({
+        type: "sync-progress",
+        projectId: 3,
+        machineId: 5,
+        filename: "notes.md",
+        completed: 2,
+        total: 5,
+        phase: "push",
+      });
+    });
+
+    expect(screen.getByTestId("progress").textContent).toBe("push:2/5");
+
+    act(() => {
+      latestSocket().emitMessage({
+        type: "sync-complete",
+        projectId: 3,
+        machineId: 5,
+        at: new Date().toISOString(),
+      });
+    });
+
+    expect(screen.getByTestId("progress").textContent).toBe("idle");
     const calledKeys = spy.mock.calls.map((call) => call[0]?.queryKey);
     expect(calledKeys).toContainEqual(["projects", 3]);
     expect(calledKeys).toContainEqual(["projects", 3, "conflicts"]);
