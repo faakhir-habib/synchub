@@ -101,6 +101,18 @@ export function watchProjects(
         // running watch session (audit #13).
         timers.delete(path);
 
+        // A local add/change is an explicit "this file should exist again"
+        // signal: clear any existing tombstone for it BEFORE enqueuing the
+        // push. Without this, a file deleted (tombstoned) then recreated/
+        // edited under the same name — before the Hub delete was confirmed
+        // — would keep looking tombstoned to reconcile, which would keep
+        // re-issuing api.deleteFile for it forever instead of letting the
+        // recreate sync normally. This does not reopen the resurrection
+        // guard (audit #5): that guard only blocks re-PULLING a file the
+        // user deleted; once the user recreates it locally, the file exists
+        // locally again, so there's nothing left to resurrect.
+        tombstones.delete(`${m.project_id}/${filename}`);
+
         queue.enqueue(`push:${m.project_id}/${filename}`, async () => {
           // Read at job-run time (not debounce time) so the freshest
           // content is pushed. Guard: the file may have been deleted

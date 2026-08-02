@@ -144,12 +144,32 @@ export async function cmdRun(deps: Pick<CliDeps, "loadConfig" | "log" | "runAgen
   // doing.
   const keepAlive = setInterval(() => {}, 1 << 30);
 
+  // Belt-and-suspenders crash guard (defense-in-depth alongside the
+  // try/catch around state.ts/tombstones.ts's doFlush): any stray throw or
+  // rejection that isn't already caught somewhere must not silently kill
+  // this long-lived daemon process — especially since the Windows
+  // Scheduled-Task install path has no auto-restart, so a crash here stays
+  // dead until someone notices. Log and keep running; never process.exit.
+  // Installed only for this daemon `run` path (not globally), and removed
+  // again on shutdown so it doesn't leak into other cmd* invocations or
+  // across tests.
+  const onUncaughtException = (err: unknown): void => {
+    deps.log(`uncaught exception (agent kept running): ${String(err)}`);
+  };
+  const onUnhandledRejection = (err: unknown): void => {
+    deps.log(`unhandled rejection (agent kept running): ${String(err)}`);
+  };
+  process.on("uncaughtException", onUncaughtException);
+  process.on("unhandledRejection", onUnhandledRejection);
+
   let stopping = false;
   const shutdown = (): void => {
     if (stopping) return;
     stopping = true;
     deps.log("shutting down...");
     clearInterval(keepAlive);
+    process.removeListener("uncaughtException", onUncaughtException);
+    process.removeListener("unhandledRejection", onUnhandledRejection);
     handle
       .stop()
       .catch((err: unknown) => deps.log(`error during shutdown: ${String(err)}`))

@@ -198,6 +198,51 @@ describe("watchProjects", () => {
     handle.close();
   });
 
+  it("clears an existing tombstone on a local add/change, before the push is enqueued (a recreated file un-tombstones itself)", async () => {
+    const m = mapping({ project_id: 1, local_path: "C:\\proj1" });
+    const watcher = makeFakeWatcher();
+    const queue = makeQueue();
+    const state = makeState();
+    const api = makeApi();
+    const tombstones = makeTombstones();
+    tombstones.add("1/chat.jsonl");
+
+    const handle = watchProjects(queue as never, api, state, tombstones, [m], {
+      log,
+      notify,
+      debounceMs: 300,
+      watcherFactory: () => watcher,
+    });
+
+    const path = join("C:\\proj1", "chat.jsonl");
+    watcher.emit("change", path);
+
+    // Still tombstoned immediately after the raw fs event — the clear
+    // happens in the debounced handler, not synchronously at emit time.
+    expect(tombstones.has("1/chat.jsonl")).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(300);
+
+    // Cleared before/at the point the push job is enqueued.
+    expect(tombstones.has("1/chat.jsonl")).toBe(false);
+    expect(queue.enqueue).toHaveBeenCalledTimes(1);
+    expect(queue.has("push:1/chat.jsonl")).toBe(true);
+
+    readFileMock.mockResolvedValue("recreated-content");
+    await queue.run("push:1/chat.jsonl");
+
+    expect(pushLocalSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ api, state }),
+      1,
+      "C:\\proj1",
+      "chat.jsonl",
+      "recreated-content",
+      null,
+    );
+
+    handle.close();
+  });
+
   it("coalesces rapid repeated changes to the same path into one enqueue, and the timer map is bounded (entry deleted after firing)", async () => {
     const m = mapping({ project_id: 1, local_path: "C:\\proj1" });
     const watcher = makeFakeWatcher();

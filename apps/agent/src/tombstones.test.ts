@@ -194,4 +194,53 @@ describe("tombstones batched persistence", () => {
     vi.advanceTimersByTime(1000);
     expect(mockedWrite).toHaveBeenCalledTimes(1);
   });
+
+  it("a writeFileAtomic failure during the debounced flush does not throw/crash, logs via console.error, and keeps dirty so a later successful flush persists", () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockedWrite.mockImplementationOnce(() => {
+      throw new Error("disk full");
+    });
+
+    const store = createTombstones(tombstoneFile);
+    store.add("1/a.jsonl");
+
+    // The debounced flush fires and writeFileAtomic throws internally —
+    // this must not escape the timer callback.
+    expect(() => vi.advanceTimersByTime(200)).not.toThrow();
+    expect(mockedWrite).toHaveBeenCalledTimes(1);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("synchub"),
+      expect.anything(),
+    );
+
+    // dirty must have been preserved (not cleared on failure): a later
+    // mutation's debounced flush should retry the write, and this time it
+    // succeeds, persisting to disk.
+    store.add("2/b.jsonl");
+    vi.advanceTimersByTime(200);
+    expect(mockedWrite).toHaveBeenCalledTimes(2);
+
+    const reloaded = createTombstones(tombstoneFile);
+    expect(reloaded.has("1/a.jsonl")).toBe(true);
+    expect(reloaded.has("2/b.jsonl")).toBe(true);
+    reloaded.close();
+
+    store.close();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("close() swallows a writeFileAtomic failure rather than throwing out of the shutdown path", () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockedWrite.mockImplementationOnce(() => {
+      throw new Error("disk full");
+    });
+
+    const store = createTombstones(tombstoneFile);
+    store.add("1/a.jsonl");
+
+    expect(() => store.close()).not.toThrow();
+    expect(consoleErrorSpy).toHaveBeenCalled();
+
+    consoleErrorSpy.mockRestore();
+  });
 });

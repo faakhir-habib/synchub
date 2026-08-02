@@ -277,6 +277,25 @@ describe("reconcile", () => {
       expect(state.get(1, "recreated.jsonl")).toBe("new-hub-hash");
     });
 
+    it("tombstone cleared by a local recreate: reconcileProject treats it as a normal local-only file (no deleteFile re-attempt)", async () => {
+      mkdirSync(localDir, { recursive: true });
+      writeFileSync(join(localDir, "recreated.jsonl"), "new-local-content");
+      // Simulate the watcher's fix: it tombstoned the file on unlink, then
+      // cleared the tombstone itself when the same filename was recreated
+      // locally — by the time reconcile runs, there's no tombstone left.
+      tombstones.add("1/recreated.jsonl");
+      tombstones.delete("1/recreated.jsonl");
+
+      const deleteFile = vi.fn(async () => ({ ok: true, data: { status: "deleted" } }));
+      const push = vi.fn(async () => ({ ok: true, data: { status: "accepted", hash: "new-hash" } }));
+      const api = makeApi({ getManifest: vi.fn(async () => ({ ok: true, data: [] })), deleteFile, push });
+
+      await reconcileProject(deps(api), { projectId: 1, localPath: localDir });
+
+      expect(deleteFile).not.toHaveBeenCalled();
+      expect(push).toHaveBeenCalledWith(1, "recreated.jsonl", "new-local-content", null);
+    });
+
     it("manifest entry with an unsafe (path-traversal) filename is skipped: no writeFile", async () => {
       const manifest: ManifestEntry[] = [
         { filename: "../evil.jsonl", hash: "hub-hash", size: 10, updated_at: "x" },
