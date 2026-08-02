@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { homedir } from "node:os";
 
@@ -439,14 +438,16 @@ function realRemoveFile(path: string): void {
  * is fine there.
  */
 function detectIsPackagedBinary(): boolean {
-  try {
-    const importMetaUrl = (import.meta as { url?: string }).url;
-    const req = createRequire(importMetaUrl ?? "file:///synchub-agent/dummy.js");
-    const sea = req("node:sea") as { isSea: () => boolean };
-    return sea.isSea();
-  } catch {
-    return false;
-  }
+  // The SEA build bakes SYNCHUB_SEA="1" via esbuild `define` (scripts/build-sea.mjs)
+  // — the same compile-time mechanism version.ts uses for the version. In the
+  // packaged binary this is the literal "1"; under `node dist/cli.js` / `tsx`
+  // dev it's a normal env lookup → undefined.
+  //
+  // (An earlier node:sea/createRequire probe was buggy: import.meta.url is
+  // undefined inside the SEA bundle, so createRequire(dummyUrl) threw
+  // ERR_INVALID_ARG_VALUE and mis-reported the real binary as "not packaged",
+  // making `install` refuse to run in the shipped binary.)
+  return process.env.SYNCHUB_SEA === "1";
 }
 
 /** Real (non-test) deps for the CLI: hits the actual OS. */

@@ -57,6 +57,10 @@ async function bundle() {
     external: ["node-notifier"],
     define: {
       "process.env.SYNCHUB_VERSION": JSON.stringify(pkg.version),
+      // Marks the bundle as the packaged SEA binary so `install` can tell it
+      // apart from `node dist/cli.js` / `tsx` dev runs (service.ts). Baked at
+      // build time, exactly like SYNCHUB_VERSION above.
+      "process.env.SYNCHUB_SEA": JSON.stringify("1"),
     },
     banner: { js: "" },
     logLevel: "info",
