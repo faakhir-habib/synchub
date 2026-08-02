@@ -13,6 +13,7 @@ function makeDeps(overrides: Partial<ServiceDeps> = {}): ServiceDeps {
     selfPath: SELF_PATH,
     configPath: CONFIG_PATH,
     homedir: HOMEDIR,
+    isPackagedBinary: true,
     runCommand: vi.fn(() => ({ code: 0, stdout: "", stderr: "" })),
     writeFile: vi.fn(),
     removeFile: vi.fn(),
@@ -21,6 +22,29 @@ function makeDeps(overrides: Partial<ServiceDeps> = {}): ServiceDeps {
     ...overrides,
   };
 }
+
+describe("installService — requires the packaged SEA binary", () => {
+  it("refuses to install and touches nothing when not running as the packaged binary", () => {
+    const deps = makeDeps({ isPackagedBinary: false });
+
+    const code = installService(deps);
+
+    expect(code).toBe(1);
+    expect(deps.writeFile).not.toHaveBeenCalled();
+    expect(deps.runCommand).not.toHaveBeenCalled();
+    expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/packaged.*binary/i));
+    expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/build:sea/));
+  });
+
+  it("proceeds as normal when running as the packaged binary", () => {
+    const deps = makeDeps({ isPackagedBinary: true });
+
+    const code = installService(deps);
+
+    expect(code).toBe(0);
+    expect(deps.writeFile).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("installService — linux (systemd user unit)", () => {
   it("writes the unit file with ExecStart pointing at selfPath and SYNCHUB_CONFIG baked in", () => {
@@ -66,7 +90,7 @@ describe("installService — linux (systemd user unit)", () => {
 
 describe("uninstallService — linux", () => {
   it("disables --now, removes the unit file, and reloads the daemon", () => {
-    const deps = makeDeps();
+    const deps = makeDeps({ readFileExists: vi.fn(() => true) });
 
     const code = uninstallService(deps);
 
@@ -81,6 +105,17 @@ describe("uninstallService — linux", () => {
       `${HOMEDIR}/.config/systemd/user/synchub-agent.service`,
     );
     expect(deps.runCommand).toHaveBeenCalledWith("systemctl", ["--user", "daemon-reload"]);
+  });
+
+  it("is idempotent: no-ops cleanly when the unit file doesn't exist", () => {
+    const deps = makeDeps({ readFileExists: vi.fn(() => false) });
+
+    const code = uninstallService(deps);
+
+    expect(code).toBe(0);
+    expect(deps.runCommand).not.toHaveBeenCalled();
+    expect(deps.removeFile).not.toHaveBeenCalled();
+    expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/not installed.*nothing to remove/i));
   });
 });
 
@@ -166,7 +201,7 @@ describe("installService — darwin (launchd plist)", () => {
 
   describe("uninstallService", () => {
     it("unloads via launchctl and removes the plist", () => {
-      const deps = darwinDeps();
+      const deps = darwinDeps({ readFileExists: vi.fn(() => true) });
 
       const code = uninstallService(deps);
 
@@ -179,6 +214,17 @@ describe("installService — darwin (launchd plist)", () => {
       expect(deps.removeFile).toHaveBeenCalledWith(
         `${HOMEDIR}/Library/LaunchAgents/cloud.mylogiclab.synchub-agent.plist`,
       );
+    });
+
+    it("is idempotent: no-ops cleanly when the plist doesn't exist", () => {
+      const deps = darwinDeps({ readFileExists: vi.fn(() => false) });
+
+      const code = uninstallService(deps);
+
+      expect(code).toBe(0);
+      expect(deps.runCommand).not.toHaveBeenCalled();
+      expect(deps.removeFile).not.toHaveBeenCalled();
+      expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/not installed.*nothing to remove/i));
     });
   });
 
@@ -227,18 +273,39 @@ describe("installService — win32 (Scheduled Task)", () => {
     return makeDeps({ platform: "win32", ...overrides });
   }
 
-  it("creates a Scheduled Task pointing at selfPath run, at ONSTART as SYSTEM/HIGHEST", () => {
+  it("creates a Scheduled Task pointing at selfPath run, at ONSTART as SYSTEM/HIGHEST, with SYNCHUB_CONFIG baked in", () => {
     const deps = winDeps();
 
     const code = installService(deps);
 
     expect(code).toBe(0);
-    expect(deps.runCommand).toHaveBeenCalledWith("schtasks", [
+    expect(deps.runCommand).toHaveBeenCalledTimes(1);
+    const [cmd, args] = (deps.runCommand as ReturnType<typeof vi.fn>).mock.calls[0] as [string, string[]];
+    expect(cmd).toBe("schtasks");
+
+    // The whole `cmd /c set ... && "<selfPath>" run` string must be ONE argv
+    // element (schtasks stores everything after /TR verbatim as "Task To
+    // Run" and hands it to the command processor at trigger time — splitting
+    // it across multiple argv entries would make schtasks treat the rest as
+    // separate /Create switches instead of part of the command).
+    const trIndex = args.indexOf("/TR");
+    expect(trIndex).toBeGreaterThan(-1);
+    const trValue = args[trIndex + 1];
+
+    expect(trValue.startsWith("cmd /c ")).toBe(true);
+    expect(trValue).toContain(`SYNCHUB_CONFIG=${CONFIG_PATH}`);
+    expect(trValue).toContain(`"${SELF_PATH}" run`);
+    // The env var must be SET (via `set` + `&&`) BEFORE the binary runs.
+    expect(trValue.indexOf(`SYNCHUB_CONFIG=${CONFIG_PATH}`)).toBeLessThan(
+      trValue.indexOf(`"${SELF_PATH}" run`),
+    );
+
+    expect(args).toEqual([
       "/Create",
       "/TN",
       "SyncHubAgent",
       "/TR",
-      `"${SELF_PATH}" run`,
+      trValue,
       "/SC",
       "ONSTART",
       "/RU",
@@ -269,18 +336,61 @@ describe("installService — win32 (Scheduled Task)", () => {
   });
 
   describe("uninstallService", () => {
-    it("deletes the scheduled task", () => {
+    it("deletes the scheduled task when one is installed", () => {
       const deps = winDeps();
 
       const code = uninstallService(deps);
 
       expect(code).toBe(0);
+      expect(deps.runCommand).toHaveBeenCalledWith("schtasks", ["/Query", "/TN", "SyncHubAgent"]);
       expect(deps.runCommand).toHaveBeenCalledWith("schtasks", [
         "/Delete",
         "/TN",
         "SyncHubAgent",
         "/F",
       ]);
+    });
+
+    it("is idempotent: no-ops cleanly when /Query reports the task doesn't exist", () => {
+      const deps = winDeps({
+        runCommand: vi.fn(() => ({ code: 1, stdout: "", stderr: "ERROR: not found" })),
+      });
+
+      const code = uninstallService(deps);
+
+      expect(code).toBe(0);
+      expect(deps.runCommand).toHaveBeenCalledTimes(1);
+      expect(deps.runCommand).toHaveBeenCalledWith("schtasks", ["/Query", "/TN", "SyncHubAgent"]);
+      expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/not installed.*nothing to remove/i));
+      expect(deps.log).not.toHaveBeenCalledWith(expect.stringMatching(/elevat/i));
+    });
+
+    it("shows the elevation hint when /Delete genuinely fails with access denied", () => {
+      const deps = winDeps({
+        runCommand: vi.fn((cmd, args) => {
+          if (args[0] === "/Query") return { code: 0, stdout: "TaskName: SyncHubAgent\n", stderr: "" };
+          return { code: 5, stdout: "", stderr: "ERROR: Access is denied." };
+        }),
+      });
+
+      const code = uninstallService(deps);
+
+      expect(code).not.toBe(0);
+      expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/elevat/i));
+    });
+
+    it("does not show the elevation hint when /Delete fails for a non-access-denied reason", () => {
+      const deps = winDeps({
+        runCommand: vi.fn((cmd, args) => {
+          if (args[0] === "/Query") return { code: 0, stdout: "TaskName: SyncHubAgent\n", stderr: "" };
+          return { code: 1, stdout: "", stderr: "ERROR: something else went wrong" };
+        }),
+      });
+
+      const code = uninstallService(deps);
+
+      expect(code).not.toBe(0);
+      expect(deps.log).not.toHaveBeenCalledWith(expect.stringMatching(/elevat/i));
     });
   });
 
@@ -325,6 +435,22 @@ describe("installService — win32 (Scheduled Task)", () => {
 
       expect(status.installed).toBe(true);
       expect(status.running).toBe(false);
+    });
+
+    it("reports installed:true based on exit code alone, regardless of stdout locale", () => {
+      const deps = winDeps({
+        runCommand: vi.fn(() => ({
+          code: 0,
+          // German-localized schtasks output — no "Running"/"Ready" substrings
+          // our regex would ever match. `installed` must not depend on this.
+          stdout: "Taskname: SyncHubAgent\nStatus: Wird ausgeführt\n",
+          stderr: "",
+        })),
+      });
+
+      const status = serviceStatus(deps);
+
+      expect(status.installed).toBe(true);
     });
   });
 });
