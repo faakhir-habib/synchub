@@ -54,6 +54,7 @@ Environment variables:
   SYNCHUB_CODE      Pairing code (used when -Code is not given)
   SYNCHUB_HUB       Hub URL (used when -Hub is not given)
   SYNCHUB_REPO      GitHub "owner/repo" to install from (default: faakhir-habib/synchub)
+  SYNCHUB_TOKEN     GitHub token (Bearer) to download from a PRIVATE repo's releases
 
 Options:
   -Help             Show this help and exit
@@ -101,7 +102,6 @@ if ($Version -eq "latest") {
 }
 
 Write-Log "detected win/$Arch -> $Asset"
-Write-Log "downloading $DownloadUrl"
 
 # --- 2. Download and install --------------------------------------------------
 
@@ -111,7 +111,21 @@ $InstallPath = Join-Path $InstallDir "synchub-agent.exe"
 $TmpPath = "$InstallPath.download"
 
 try {
-  Invoke-WebRequest -Uri $DownloadUrl -OutFile $TmpPath -UseBasicParsing
+  if ($env:SYNCHUB_TOKEN) {
+    # Private repo: the plain releases/.../download URL 404s without auth, so
+    # resolve the asset via the API and pull it with a Bearer token.
+    $relApiUrl = if ($Version -eq "latest") { "https://api.github.com/repos/$Repo/releases/latest" } else { "https://api.github.com/repos/$Repo/releases/tags/$Version" }
+    $apiHead = @{ Authorization = "Bearer $($env:SYNCHUB_TOKEN)"; "User-Agent" = "synchub-installer"; Accept = "application/vnd.github+json" }
+    $rel = Invoke-RestMethod -Uri $relApiUrl -Headers $apiHead
+    $assetObj = $rel.assets | Where-Object { $_.name -eq $Asset } | Select-Object -First 1
+    if (-not $assetObj) { throw "asset '$Asset' not found in release '$($rel.tag_name)'" }
+    Write-Log "downloading (authenticated) $($assetObj.name) from release $($rel.tag_name)"
+    $dlHead = @{ Authorization = "Bearer $($env:SYNCHUB_TOKEN)"; "User-Agent" = "synchub-installer"; Accept = "application/octet-stream" }
+    Invoke-WebRequest -Uri $assetObj.url -Headers $dlHead -OutFile $TmpPath -UseBasicParsing
+  } else {
+    Write-Log "downloading $DownloadUrl"
+    Invoke-WebRequest -Uri $DownloadUrl -OutFile $TmpPath -UseBasicParsing
+  }
 } catch {
   Write-ErrLog "download failed: $($_.Exception.Message)"
   Write-ErrLog "Check that a release exists for $Version with asset $Asset"
