@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import type { WsMessage } from "@synchub/shared";
 import { openRealtimeSocket, type RealtimeSocket } from "../lib/ws.js";
 import { setPresence } from "./presence-store.js";
+import { setProgress, clearProgress } from "./progress-store.js";
 import { qk } from "../lib/query-keys.js";
 import { useAuth } from "../auth/auth-context.js";
 
@@ -41,11 +42,19 @@ function dispatch(msg: WsMessage, queryClient: QueryClient): void {
       return;
 
     case "sync-progress":
-      // Transient per-file progress. No dedicated UI yet (later task) — just
-      // make sure the message is a recognized no-op, not a crash.
+      // Transient per-file progress — drives the live indicator on Project
+      // Detail via progress-store (module-level, outside the query cache).
+      setProgress(msg.projectId, {
+        machineId: msg.machineId,
+        filename: msg.filename,
+        completed: msg.completed,
+        total: msg.total,
+        phase: msg.phase,
+      });
       return;
 
     case "sync-complete":
+      clearProgress(msg.projectId);
       queryClient.invalidateQueries({ queryKey: qk.project(msg.projectId) });
       queryClient.invalidateQueries({ queryKey: qk.projectConflicts(msg.projectId) });
       queryClient.invalidateQueries({ queryKey: qk.dashboardMetrics });

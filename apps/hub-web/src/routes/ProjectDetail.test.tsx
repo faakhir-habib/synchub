@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, within, fireEvent, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Conflict, PublicMachine } from "@synchub/shared";
 import { ApiError } from "../lib/api-error.js";
@@ -60,6 +60,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 
 // Imported after the mocks above so it picks up the mocked modules.
 import { ProjectDetail } from "./ProjectDetail.js";
+import { setProgress, clearProgress } from "../realtime/progress-store.js";
 
 const NOW = Date.now();
 
@@ -153,6 +154,10 @@ beforeEach(() => {
 
   getProjectConflictsMock.mockResolvedValue(CONFLICTS);
   getMachinesMock.mockResolvedValue(MACHINES);
+
+  // progress-store is module-level state (mirrors the live WS-driven store
+  // in prod) — reset it between tests so nothing bleeds across cases.
+  clearProgress(PROJECT.id);
 
   // jsdom doesn't implement scrollIntoView or pointer capture, both of which
   // Radix Select touches when opening/positioning its listbox — without
@@ -336,5 +341,35 @@ describe("ProjectDetail", () => {
     expect(screen.getByText(/project not found/i)).toBeDefined();
     expect(getProjectMock).not.toHaveBeenCalled();
     expect(getProjectConflictsMock).not.toHaveBeenCalled();
+  });
+
+  it("shows a live sync-progress indicator on setProgress and hides it again on clearProgress", async () => {
+    getProjectMock.mockResolvedValue(PROJECT);
+
+    const { ui } = wrap(<ProjectDetail projectId={PROJECT.id} />);
+    render(ui);
+
+    await waitFor(() => expect(screen.getByText("dotfiles")).toBeDefined());
+    expect(screen.queryByTestId("sync-progress")).toBeNull();
+
+    act(() => {
+      setProgress(PROJECT.id, {
+        machineId: 10,
+        filename: "notes.md",
+        completed: 2,
+        total: 5,
+        phase: "push",
+      });
+    });
+
+    const indicator = screen.getByTestId("sync-progress");
+    expect(indicator.textContent).toMatch(/2\/5/);
+    expect(indicator.textContent).toMatch(/notes\.md/);
+
+    act(() => {
+      clearProgress(PROJECT.id);
+    });
+
+    expect(screen.queryByTestId("sync-progress")).toBeNull();
   });
 });

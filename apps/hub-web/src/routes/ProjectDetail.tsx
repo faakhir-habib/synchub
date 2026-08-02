@@ -26,6 +26,7 @@ import { qk } from "@/lib/query-keys";
 import { ApiError } from "@/lib/api-error";
 import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useProjectProgress } from "@/realtime/progress-store";
 import { StatCard } from "@/components/StatCard";
 import { ActivityFeed } from "@/components/ActivityFeed";
 import { ErrorPanel } from "@/components/ErrorPanel";
@@ -49,6 +50,54 @@ const SYNC_MODE_OPTIONS: { value: SyncMode; label: string }[] = [
   { value: "manual", label: "Manual — sync on demand" },
   { value: "stopped", label: "Stopped — paused" },
 ];
+
+const PROGRESS_PHASE_LABEL: Record<"scan" | "push" | "pull", string> = {
+  scan: "Scanning",
+  push: "Pushing",
+  pull: "Pulling",
+};
+
+interface SyncProgressBarProps {
+  completed: number;
+  total: number;
+  phase: "scan" | "push" | "pull";
+  filename?: string;
+}
+
+/**
+ * Slim live indicator driven by `sync-progress` WS frames (progress-store).
+ * Mounted only while a sync is actively streaming progress for this project;
+ * disappears the moment `sync-complete` clears the store (see
+ * realtime-provider.tsx's dispatch).
+ */
+function SyncProgressBar({ completed, total, phase, filename }: SyncProgressBarProps) {
+  const pct = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
+  return (
+    <div
+      data-testid="sync-progress"
+      className="flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2.5"
+    >
+      <RefreshCw className="h-4 w-4 shrink-0 animate-spin text-primary" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
+          <p className="truncate text-xs font-medium text-foreground">
+            {PROGRESS_PHASE_LABEL[phase]}… {completed}/{total}
+            {filename ? ` · ${filename}` : ""}
+          </p>
+          <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+            {pct}%
+          </span>
+        </div>
+        <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-primary/15">
+          <div
+            className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function BackLink() {
   return (
@@ -117,11 +166,14 @@ interface ProjectDetailProps {
  * conflicts for a single project. Realtime already invalidates
  * `qk.project(id)` and `qk.projectConflicts(id)` on `changed`/`sync-complete`/
  * `conflict` WS frames (realtime-provider), so this refetches live with no
- * extra wiring here.
+ * extra wiring here. `sync-progress` frames additionally drive a live
+ * progress bar via progress-store (see `useProjectProgress` below), cleared
+ * automatically on `sync-complete`.
  */
 export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const queryClient = useQueryClient();
   const [addMappingOpen, setAddMappingOpen] = useState(false);
+  const progress = useProjectProgress(projectId);
 
   // A non-numeric route param (typo'd URL, stale bookmark) arrives here as
   // NaN. There's nothing to look up — skip the request entirely (both
@@ -240,6 +292,15 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           </Button>
         </div>
       </header>
+
+      {progress ? (
+        <SyncProgressBar
+          completed={progress.completed}
+          total={progress.total}
+          phase={progress.phase}
+          filename={progress.filename}
+        />
+      ) : null}
 
       <section aria-label="Project stats" className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Tracked files" icon={Files} accent="primary" value={data.tracked_files} />
