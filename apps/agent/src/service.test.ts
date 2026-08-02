@@ -56,7 +56,7 @@ describe("installService — linux (systemd user unit)", () => {
     expect(deps.writeFile).toHaveBeenCalledTimes(1);
     const [path, content] = (deps.writeFile as ReturnType<typeof vi.fn>).mock.calls[0] as [string, string];
     expect(path).toBe(`${HOMEDIR}/.config/systemd/user/synchub-agent.service`);
-    expect(content).toContain(`ExecStart=${SELF_PATH} run`);
+    expect(content).toContain(`ExecStart=${SELF_PATH} run --service`);
     expect(content).toContain(`Environment=SYNCHUB_CONFIG=${CONFIG_PATH}`);
     expect(content).toContain("After=network-online.target");
     expect(content).toContain("Restart=on-failure");
@@ -169,6 +169,7 @@ describe("installService — darwin (launchd plist)", () => {
     expect(path).toBe(`${HOMEDIR}/Library/LaunchAgents/cloud.mylogiclab.synchub-agent.plist`);
     expect(content).toContain(`<string>${SELF_PATH}</string>`);
     expect(content).toContain("<string>run</string>");
+    expect(content).toContain("<string>--service</string>");
     expect(content).toContain("<key>RunAtLoad</key>");
     expect(content).toContain("<key>KeepAlive</key>");
     expect(content).toContain("<key>EnvironmentVariables</key>");
@@ -273,7 +274,7 @@ describe("installService — win32 (Scheduled Task)", () => {
     return makeDeps({ platform: "win32", ...overrides });
   }
 
-  it("creates a Scheduled Task pointing at selfPath run, at ONSTART as SYSTEM/HIGHEST, with SYNCHUB_CONFIG baked in", () => {
+  it("creates a Scheduled Task pointing at selfPath run --service, at ONSTART as SYSTEM/HIGHEST, with SYNCHUB_CONFIG baked in", () => {
     const deps = winDeps();
 
     const code = installService(deps);
@@ -283,21 +284,21 @@ describe("installService — win32 (Scheduled Task)", () => {
     const [cmd, args] = (deps.runCommand as ReturnType<typeof vi.fn>).mock.calls[0] as [string, string[]];
     expect(cmd).toBe("schtasks");
 
-    // The whole `cmd /c set ... && "<selfPath>" run` string must be ONE argv
-    // element (schtasks stores everything after /TR verbatim as "Task To
-    // Run" and hands it to the command processor at trigger time — splitting
-    // it across multiple argv entries would make schtasks treat the rest as
-    // separate /Create switches instead of part of the command).
+    // The whole `cmd /c set ... && "<selfPath>" run --service` string must
+    // be ONE argv element (schtasks stores everything after /TR verbatim as
+    // "Task To Run" and hands it to the command processor at trigger time —
+    // splitting it across multiple argv entries would make schtasks treat
+    // the rest as separate /Create switches instead of part of the command).
     const trIndex = args.indexOf("/TR");
     expect(trIndex).toBeGreaterThan(-1);
     const trValue = args[trIndex + 1];
 
     expect(trValue.startsWith("cmd /c ")).toBe(true);
     expect(trValue).toContain(`SYNCHUB_CONFIG=${CONFIG_PATH}`);
-    expect(trValue).toContain(`"${SELF_PATH}" run`);
+    expect(trValue).toContain(`"${SELF_PATH}" run --service`);
     // The env var must be SET (via `set` + `&&`) BEFORE the binary runs.
     expect(trValue.indexOf(`SYNCHUB_CONFIG=${CONFIG_PATH}`)).toBeLessThan(
-      trValue.indexOf(`"${SELF_PATH}" run`),
+      trValue.indexOf(`"${SELF_PATH}" run --service`),
     );
 
     expect(args).toEqual([

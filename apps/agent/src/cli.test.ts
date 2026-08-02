@@ -347,6 +347,71 @@ describe("cmdRun", () => {
     captureAndCleanupShutdownListeners().cleanup();
   });
 
+  it("interactive (no --service) still returns 1 immediately when unpaired, without polling loadConfig", async () => {
+    const loadConfig = vi.fn(() => null);
+    const deps = makeDeps({ loadConfig });
+
+    const code = await cmdRun(deps, { serviceMode: false });
+
+    expect(code).toBe(1);
+    expect(deps.runAgent).not.toHaveBeenCalled();
+    // Exactly one synchronous check — no wait/poll loop for the interactive path.
+    expect(loadConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it("(--service) waits for pairing: polls loadConfig on a tiny interval and starts the agent once a config appears", async () => {
+    const cfg: AgentConfig = { hubUrl: "http://hub:8080", machineToken: "tok", machineId: 7 };
+    let calls = 0;
+    // Deterministic + fast: returns null for the first two checks, then a
+    // config — no real multi-second wait, just a few 5ms poll ticks.
+    const loadConfig = vi.fn(() => {
+      calls += 1;
+      return calls < 3 ? null : cfg;
+    });
+    const deps = makeDeps({ loadConfig });
+    const setIntervalSpy = vi.spyOn(global, "setInterval");
+
+    const code = await cmdRun(deps, { serviceMode: true, pairPollMs: 5 });
+
+    expect(code).toBe(0);
+    expect(deps.runAgent).toHaveBeenCalledWith(cfg, expect.objectContaining({ log: deps.log }));
+    expect(calls).toBeGreaterThanOrEqual(3);
+    expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/waiting for/i));
+
+    for (const call of setIntervalSpy.mock.results) clearInterval(call.value as NodeJS.Timeout);
+    setIntervalSpy.mockRestore();
+    captureAndCleanupShutdownListeners().cleanup();
+  });
+
+  it("(--service) a SIGINT during the wait-for-pairing phase clears the poll timer + keepalive and exits 0, without starting the agent", async () => {
+    const loadConfig = vi.fn(() => null); // never pairs during this test
+    const deps = makeDeps({ loadConfig });
+    const setIntervalSpy = vi.spyOn(global, "setInterval");
+    const clearIntervalSpy = vi.spyOn(global, "clearInterval");
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((): never => undefined as never));
+
+    const runPromise = cmdRun(deps, { serviceMode: true, pairPollMs: 5 });
+
+    // cmdRun runs synchronously up to its first await (the pairing-wait
+    // promise), so by this point the keepalive + poll timer, and the
+    // SIGINT/SIGTERM listeners, are already installed.
+    expect(setIntervalSpy).toHaveBeenCalledTimes(2);
+    const { shutdown, cleanup } = captureAndCleanupShutdownListeners();
+    shutdown();
+
+    const code = await runPromise;
+
+    expect(code).toBe(0);
+    expect(deps.runAgent).not.toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(clearIntervalSpy).toHaveBeenCalledTimes(2); // keepalive + poll timer
+
+    cleanup();
+    setIntervalSpy.mockRestore();
+    clearIntervalSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
   it("removes the uncaughtException/unhandledRejection handlers on shutdown (no leak across sessions)", async () => {
     const cfg: AgentConfig = { hubUrl: "http://hub:8080", machineToken: "tok", machineId: 7 };
     const stop = vi.fn(async () => {});
@@ -425,5 +490,20 @@ describe("main", () => {
 
     expect(code).toBe(0);
     expect(deps.uninstallService).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes 'run --service' to cmdRun in service mode (already-paired: starts immediately, no wait)", async () => {
+    const cfg: AgentConfig = { hubUrl: "http://hub:8080", machineToken: "tok", machineId: 7 };
+    const deps = makeDeps({ loadConfig: vi.fn(() => cfg) });
+    const setIntervalSpy = vi.spyOn(global, "setInterval");
+
+    const code = await main(["node", "cli", "run", "--service"], deps);
+
+    expect(code).toBe(0);
+    expect(deps.runAgent).toHaveBeenCalledWith(cfg, expect.objectContaining({ log: deps.log }));
+
+    for (const call of setIntervalSpy.mock.results) clearInterval(call.value as NodeJS.Timeout);
+    setIntervalSpy.mockRestore();
+    captureAndCleanupShutdownListeners().cleanup();
   });
 });

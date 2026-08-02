@@ -161,18 +161,60 @@ if (($env:Path -split ";") -notcontains $InstallDir) {
 if (-not $Code) { $Code = $env:SYNCHUB_CODE }
 if (-not $Hub) { $Hub = $env:SYNCHUB_HUB }
 
+$paired = $false
 if ($Code -and $Hub) {
   Write-Log "pairing with $Hub ..."
   & $InstallPath pair $Code $Hub
   if ($LASTEXITCODE -eq 0) {
-    Write-Log "paired. Register the background service with (elevated PowerShell):"
-    Write-Log "  $InstallPath install"
+    $paired = $true
+    Write-Log "paired."
   } else {
     Write-ErrLog "pairing failed - you can retry with: $InstallPath pair <CODE> <HUB_URL>"
     exit 1
   }
+}
+
+# --- 5. Auto-register + start the background service when elevated -----------
+#
+# The registered service runs `synchub-agent run --service`, which WAITS for
+# pairing (polling for the config) instead of exiting if this machine isn't
+# paired yet - so it's safe to install + start it here even before pairing:
+# once `pair` runs (from any shell, any time), the already-running service
+# picks up the config and starts syncing with no restart/reboot needed. That
+# makes `pair` the ONE manual step left after an elevated install.
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
+
+if ($isAdmin) {
+  try {
+    Write-Log "elevated PowerShell detected - registering the background service ..."
+    & $InstallPath install
+    if ($LASTEXITCODE -ne 0) {
+      throw "synchub-agent install exited with code $LASTEXITCODE"
+    }
+    Start-ScheduledTask -TaskName SyncHubAgent
+    Write-Log "service installed and running (it waits for pairing if not paired yet)."
+    if ($paired) {
+      Write-Log "already paired - SyncHub is fully set up, nothing else to do."
+    } else {
+      Write-Log "ONLY remaining step:"
+      Write-Log "  $InstallPath pair <CODE> <HUB_URL>"
+      Write-Log "(get <CODE> from the Hub UI -> Machines -> Connect machine)"
+    }
+  } catch {
+    Write-ErrLog "service setup failed: $($_.Exception.Message)"
+    Write-ErrLog "the agent binary is installed regardless - retry the service with (elevated PowerShell):"
+    Write-ErrLog "  $InstallPath install"
+    if (-not $paired) {
+      Write-Log "then pair with:"
+      Write-Log "  $InstallPath pair <CODE> <HUB_URL>"
+    }
+  }
 } else {
-  Write-Log "not paired yet. Next steps:"
+  Write-Log "not running elevated - binary install is complete, but the background service was NOT registered."
+  Write-Log "To install the background service, re-run this installer from an elevated (Administrator)"
+  Write-Log "PowerShell (or run '$InstallPath install' elevated). Then pair with:"
   Write-Log "  $InstallPath pair <CODE> <HUB_URL>"
-  Write-Log "  $InstallPath install    (run from an elevated/Administrator PowerShell)"
+  if ($paired) {
+    Write-Log "(this machine is already paired - once the service is installed elevated, it will start syncing immediately.)"
+  }
 }

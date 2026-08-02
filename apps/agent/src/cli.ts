@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { pairRedeem } from "./api.js";
 import { runAgent as runAgentImpl } from "./agent.js";
+import type { AgentConfig } from "./config.js";
 import { loadConfig as loadConfigImpl, saveConfig as saveConfigImpl } from "./config.js";
 import { configPath } from "./paths.js";
 import {
@@ -36,6 +37,9 @@ const USAGE = [
   "  synchub-agent install                                 Register as an OS service (start on boot)",
   "  synchub-agent uninstall                               Remove the OS service",
   "  synchub-agent --version                               Print the agent version",
+  "",
+  "  (internal: the registered OS service runs `run --service`, which waits",
+  "   for `pair` instead of exiting if this machine isn't paired yet.)",
 ].join("\n");
 
 /** Register this machine with the Hub using a pairing code. */
@@ -111,9 +115,29 @@ export function cmdVersion(deps: Pick<CliDeps, "log">): number {
   return 0;
 }
 
+export interface CmdRunOptions {
+  /**
+   * Service mode (`run --service`, used by the registered OS
+   * service/unit/plist/task): instead of exiting 1 when unpaired, wait —
+   * polling `loadConfig()` — until `synchub-agent pair` writes a config,
+   * then start syncing. Lets the installer register + start the service
+   * BEFORE the user pairs, with no restart/reboot required afterwards.
+   * Interactive `synchub-agent run` (no flag) keeps exiting immediately.
+   */
+  serviceMode?: boolean;
+  /** Poll interval (ms) while waiting for pairing in service mode. Default 5000; overridable for tests. */
+  pairPollMs?: number;
+}
+
 /**
  * Start the sync engine: boot the agent (reconcile, watch, connect WS) and
- * keep running until SIGINT/SIGTERM. Returns 1 immediately if unpaired.
+ * keep running until SIGINT/SIGTERM. Interactive (no `--service`): returns
+ * 1 immediately if unpaired. Service mode (`--service`, see
+ * CmdRunOptions.serviceMode): if unpaired, waits — polling `loadConfig()`
+ * every `pairPollMs` — until `pair` writes a config, then proceeds exactly
+ * as the already-paired path does. A SIGINT/SIGTERM received during that
+ * wait cleans up (poll timer + keepalive) and exits 0, same as during a
+ * normal run.
  *
  * Installs its own ref'd keepalive interval rather than relying on
  * runAgent's internal handles (the WS socket, chokidar watchers, the 30s
@@ -125,24 +149,67 @@ export function cmdVersion(deps: Pick<CliDeps, "log">): number {
  * keepalive, Node's event loop would drain and the process would exit
  * silently right after logging "Agent running", even though nothing
  * actually failed loudly — hiding the "re-pair this machine" guidance
- * that should otherwise keep appearing on every reconcile tick. SIGINT/
- * SIGTERM still call `handle.stop()`, clear the keepalive, and exit
- * explicitly.
+ * that should otherwise keep appearing on every reconcile tick. The same
+ * keepalive also spans the wait-for-pairing phase in service mode, for the
+ * same reason (no ref'd handles exist yet while waiting). SIGINT/SIGTERM
+ * still call `handle.stop()` (once running) or resolve the pending wait
+ * (if still waiting), clear the keepalive, and exit explicitly.
  */
-export async function cmdRun(deps: Pick<CliDeps, "loadConfig" | "log" | "runAgent">): Promise<number> {
-  const cfg = deps.loadConfig();
-  if (!cfg) {
+export async function cmdRun(
+  deps: Pick<CliDeps, "loadConfig" | "log" | "runAgent">,
+  opts: CmdRunOptions = {},
+): Promise<number> {
+  const serviceMode = opts.serviceMode ?? false;
+  const pairPollMs = opts.pairPollMs ?? 5000;
+
+  let cfg = deps.loadConfig();
+  if (!cfg && !serviceMode) {
     deps.log(`Not paired — run: synchub-agent pair <CODE> <HUB_URL> (config expected at ${configPath()})`);
     return 1;
   }
 
-  const handle = deps.runAgent(cfg, { log: deps.log });
-
   // ~12 days — effectively "forever" for a no-op interval. Intentionally
   // NOT unref()'d: this is the one handle whose entire job is to keep the
   // process alive regardless of what runAgent's own (unref'd) handles are
-  // doing.
+  // doing (and, in service mode, while waiting for pairing before runAgent
+  // even starts).
   const keepAlive = setInterval(() => {}, 1 << 30);
+
+  let pollTimer: ReturnType<typeof setInterval> | undefined;
+  let resolveWait: ((cfg: AgentConfig | null) => void) | undefined;
+  let handle: ReturnType<CliDeps["runAgent"]> | undefined;
+  let stopping = false;
+
+  const shutdown = (): void => {
+    if (stopping) return;
+    stopping = true;
+    deps.log("shutting down...");
+    clearInterval(keepAlive);
+    if (pollTimer !== undefined) {
+      clearInterval(pollTimer);
+      pollTimer = undefined;
+    }
+    process.removeListener("SIGINT", shutdown);
+    process.removeListener("SIGTERM", shutdown);
+
+    if (handle) {
+      process.removeListener("uncaughtException", onUncaughtException);
+      process.removeListener("unhandledRejection", onUnhandledRejection);
+      handle
+        .stop()
+        .catch((err: unknown) => deps.log(`error during shutdown: ${String(err)}`))
+        .finally(() => process.exit(0));
+    } else {
+      // Still waiting for pairing (or never started) — nothing to stop.
+      // Resolve the pending wait (if any) so `cmdRun` can return cleanly
+      // even when process.exit is mocked out (tests); in production
+      // process.exit(0) below ends the process immediately regardless.
+      resolveWait?.(null);
+      process.exit(0);
+    }
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
 
   // Belt-and-suspenders crash guard (defense-in-depth alongside the
   // try/catch around state.ts/tombstones.ts's doFlush): any stray throw or
@@ -159,24 +226,33 @@ export async function cmdRun(deps: Pick<CliDeps, "loadConfig" | "log" | "runAgen
   const onUnhandledRejection = (err: unknown): void => {
     deps.log(`unhandled rejection (agent kept running): ${String(err)}`);
   };
+
+  if (!cfg) {
+    deps.log(
+      `Not paired yet — waiting for \`synchub-agent pair <CODE> <HUB_URL>\` (config expected at ${configPath()})…`,
+    );
+    cfg = await new Promise<AgentConfig | null>((resolve) => {
+      resolveWait = resolve;
+      pollTimer = setInterval(() => {
+        const found = deps.loadConfig();
+        if (found) {
+          if (pollTimer !== undefined) clearInterval(pollTimer);
+          pollTimer = undefined;
+          resolve(found);
+        }
+      }, pairPollMs);
+    });
+
+    if (!cfg) {
+      // Only reachable via a SIGINT/SIGTERM shutdown during the wait.
+      return 0;
+    }
+    deps.log("Paired — starting sync.");
+  }
+
+  handle = deps.runAgent(cfg, { log: deps.log });
   process.on("uncaughtException", onUncaughtException);
   process.on("unhandledRejection", onUnhandledRejection);
-
-  let stopping = false;
-  const shutdown = (): void => {
-    if (stopping) return;
-    stopping = true;
-    deps.log("shutting down...");
-    clearInterval(keepAlive);
-    process.removeListener("uncaughtException", onUncaughtException);
-    process.removeListener("unhandledRejection", onUnhandledRejection);
-    handle
-      .stop()
-      .catch((err: unknown) => deps.log(`error during shutdown: ${String(err)}`))
-      .finally(() => process.exit(0));
-  };
-  process.once("SIGINT", shutdown);
-  process.once("SIGTERM", shutdown);
 
   deps.log("Agent running — Ctrl-C to stop");
   return 0;
@@ -202,7 +278,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps): Promise
     case "pair":
       return cmdPair(rest, deps);
     case "run":
-      return cmdRun(deps);
+      return cmdRun(deps, { serviceMode: rest.includes("--service") });
     case "status":
       return cmdStatus(deps);
     case "install":

@@ -143,17 +143,44 @@ esac
 CODE="${1:-${SYNCHUB_CODE:-}}"
 HUB="${2:-${SYNCHUB_HUB:-}}"
 
+PAIRED=0
 if [ -n "$CODE" ] && [ -n "$HUB" ]; then
   log "pairing with ${HUB} ..."
   if "$INSTALL_PATH" pair "$CODE" "$HUB"; then
-    log "paired. Register the background service with:"
-    log "  ${INSTALL_PATH} install"
+    PAIRED=1
+    log "paired."
   else
     err "pairing failed — you can retry with: ${INSTALL_PATH} pair <CODE> <HUB_URL>"
     exit 1
   fi
+fi
+
+# --- 4. Auto-register the user background service -----------------------
+#
+# The registered service runs `synchub-agent run --service`, which WAITS
+# for pairing (polling for the config) instead of exiting if this machine
+# isn't paired yet — so it's safe to register + start it here even before
+# pairing: once `pair` runs (from any shell, any time), the already-running
+# service picks up the config and starts syncing, no restart needed. That
+# makes `pair` the ONE manual step left after running this installer.
+#
+# On Linux/macOS this uses `systemctl --user` / a launchd user agent — NO
+# root/sudo required. Guarded + non-fatal: the binary is already installed
+# above, so a service hiccup here must not abort the whole script.
+if "$INSTALL_PATH" install; then
+  log "service registered and running (it waits for pairing if not paired yet)."
+  if [ "$PAIRED" -eq 1 ]; then
+    log "already paired — SyncHub is fully set up, nothing else to do."
+  else
+    log "ONLY remaining step:"
+    log "  ${INSTALL_PATH} pair <CODE> <HUB_URL>"
+    log "(get <CODE> from the Hub UI -> Machines -> Connect machine)"
+  fi
 else
-  log "not paired yet. Next steps:"
-  log "  ${INSTALL_PATH} pair <CODE> <HUB_URL>"
-  log "  ${INSTALL_PATH} install"
+  err "service registration failed — the agent binary is installed regardless."
+  err "retry it with: ${INSTALL_PATH} install"
+  if [ "$PAIRED" -eq 0 ]; then
+    log "then pair with:"
+    log "  ${INSTALL_PATH} pair <CODE> <HUB_URL>"
+  fi
 fi
