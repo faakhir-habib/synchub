@@ -26,9 +26,10 @@ docs/              design specs + per-phase implementation plans (docs/superpowe
 The Hub is a single origin: `apps/hub-api` serves `/api/*` (REST), `/ws/user` +
 `/ws/agent` (WebSocket), and the built `apps/hub-web` SPA for everything else.
 
-> **Legacy `hub/` and `agent/` (root-level)** are the original vanilla-JS
-> implementation, kept as the current agent client + historical reference. They are
-> retired once the Phase-4 agent port lands.
+> The original vanilla-JS **`hub/`** has been retired (fully replaced by
+> `apps/hub-api` + `apps/hub-web`). The root-level **`agent/`** is the original
+> vanilla-JS agent, kept as the current machine client until the Phase-4 TypeScript
+> port replaces it.
 
 ## Quick start — development
 
