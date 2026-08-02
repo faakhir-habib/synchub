@@ -10,7 +10,7 @@
     "start": "node dist/cli.js",
     "test": "vitest run --passWithNoTests"
   },
-  "dependencies": { "@synchub/shared": "workspace:*" },
+  "dependencies": { "@synchub/shared": "workspace:*", "zod": "^3.24.1" },
   "devDependencies": {
     "@types/node": "^22.10.5",
     "tsx": "^4.19.2",
