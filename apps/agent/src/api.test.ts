@@ -69,6 +69,33 @@ describe("api client", () => {
     });
   });
 
+  describe("schema mismatch", () => {
+    it("returns kind:'parse' (not ok:true with bad data, not a throw) when getMappings gets a 2xx body of the wrong shape", async () => {
+      fetchSpy.mockResolvedValue(
+        fakeResponse({
+          status: 200,
+          body: JSON.stringify([{ wrong: true }]),
+        }) as unknown as Response,
+      );
+
+      const api = createApi({ hubUrl: HUB, machineToken: TOKEN });
+      const result = await api.getMappings();
+
+      expect(result).toEqual({ ok: false, kind: "parse" });
+    });
+
+    it("returns kind:'parse' when getMappings gets a 2xx body that is valid JSON but not an array at all", async () => {
+      fetchSpy.mockResolvedValue(
+        fakeResponse({ status: 200, body: JSON.stringify({}) }) as unknown as Response,
+      );
+
+      const api = createApi({ hubUrl: HUB, machineToken: TOKEN });
+      const result = await api.getMappings();
+
+      expect(result).toEqual({ ok: false, kind: "parse" });
+    });
+  });
+
   describe("getManifest", () => {
     it("returns validated ManifestEntry[] on 2xx JSON", async () => {
       const manifest = [

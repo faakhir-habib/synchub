@@ -132,6 +132,9 @@ export function createApi({ hubUrl, machineToken }: { hubUrl: string; machineTok
   };
 }
 
+/** The shape returned by createApi — a clean seam for the Phase 4b sync engine. */
+export type Api = ReturnType<typeof createApi>;
+
 /** Redeem a pairing code (unauthenticated). */
 export async function pairRedeem(
   hubUrl: string,

@@ -67,6 +67,26 @@ describe("state", () => {
     state!.close();
   });
 
+  it.each(["null", "42"])(
+    "createState on a state file containing %s (valid JSON, wrong shape) returns an empty store, and set() does not throw",
+    (content) => {
+      mkdirSync(TEST_DIR, { recursive: true });
+      writeFileSync(stateFile, content);
+
+      let state: ReturnType<typeof createState> | undefined;
+      expect(() => {
+        state = createState(stateFile);
+      }).not.toThrow();
+
+      expect(state!.get(1, "a.jsonl")).toBeNull();
+
+      expect(() => state!.set(1, "a.jsonl", "h1")).not.toThrow();
+      expect(state!.get(1, "a.jsonl")).toBe("h1");
+
+      state!.close();
+    },
+  );
+
   it("persists across an explicit flush and a fresh createState reads it back", () => {
     const state = createState(stateFile);
     state.set(1, "a.jsonl", "h1");
