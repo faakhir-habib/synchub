@@ -33,6 +33,8 @@ export interface RealtimePort {
     projectId: number,
     p: { filename: string; hash: string; excludeMachineId?: number },
   ): void;
+  // Tell other agents (auto-mode) + the owning user's browsers that a file was deleted.
+  notifyDeleted(userId: number, projectId: number, filename: string, excludeMachineId?: number): void;
   // Live per-file sync progress → the owning user's browsers.
   syncProgress(userId: number, p: SyncProgressPayload): void;
   // A reconcile finished → the owning user's browsers.
@@ -54,6 +56,7 @@ export interface RealtimePort {
 @Injectable()
 export class NoopRealtime implements RealtimePort {
   notifyProjectChanged(): void {}
+  notifyDeleted(): void {}
   syncProgress(): void {}
   syncComplete(): void {}
   broadcastPresence(): void {}

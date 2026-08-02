@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   DashboardMetrics,
+  DeleteRequest,
   HealthResponse,
   ProjectCreateRequest,
   PushResponse,
@@ -54,6 +55,20 @@ describe("shared schemas round-trip", () => {
   it("rejects an invalid SignupRequest email", () => {
     const r = SignupRequest.safeParse({ email: "not-an-email", password: "12345678" });
     expect(r.success).toBe(false);
+  });
+
+  it("discriminates a WsDeleted message", () => {
+    const msg = WsMessage.parse({
+      type: "deleted",
+      projectId: 1,
+      filename: "a.jsonl",
+    });
+    expect(msg.type).toBe("deleted");
+  });
+
+  it("accepts a valid DeleteRequest", () => {
+    const ok = DeleteRequest.parse({ filename: "a.jsonl" });
+    expect(ok.filename).toBe("a.jsonl");
   });
 
   it("discriminates a WsSyncComplete message", () => {

@@ -152,6 +152,27 @@ describe("RealtimeProvider", () => {
     expect(calledKeys).toContainEqual(["dashboard", "activity"]);
   });
 
+  it("invalidates the project + dashboard queries on a deleted message", () => {
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    renderProvider(qc);
+    spy.mockClear();
+
+    act(() => {
+      latestSocket().emitMessage({
+        type: "deleted",
+        projectId: 3,
+        filename: "a.txt",
+      });
+    });
+
+    const calledKeys = spy.mock.calls.map((call) => call[0]?.queryKey);
+    expect(calledKeys).toContainEqual(["projects", 3]);
+    expect(calledKeys).toContainEqual(["projects", 3, "conflicts"]);
+    expect(calledKeys).toContainEqual(["dashboard", "metrics"]);
+    expect(calledKeys).toContainEqual(["dashboard", "activity"]);
+  });
+
   it("updates the progress store on a sync-progress message, and clears it on sync-complete", () => {
     const qc = new QueryClient();
     const spy = vi.spyOn(qc, "invalidateQueries");
