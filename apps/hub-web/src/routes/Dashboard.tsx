@@ -52,7 +52,7 @@ function EngineStat({
 
 export function Dashboard() {
   const metrics = useQuery({ queryKey: qk.dashboardMetrics, queryFn: getMetrics });
-  const activity = useQuery({ queryKey: qk.activity, queryFn: () => getActivity(20) });
+  const activity = useQuery({ queryKey: qk.activity, queryFn: () => getActivity(100) });
 
   const m = metrics.data;
   const metricsLoading = metrics.isPending;
@@ -120,7 +120,11 @@ export function Dashboard() {
             {activity.isError ? (
               <ErrorPanel error={activity.error} />
             ) : (
-              <ActivityFeed events={activity.data} isLoading={activity.isPending} />
+              // Cap the card height so a long feed scrolls internally instead
+              // of stretching the whole page; shows all fetched events.
+              <div className="max-h-[28rem] overflow-y-auto">
+                <ActivityFeed events={activity.data} isLoading={activity.isPending} />
+              </div>
             )}
           </CardContent>
         </Card>

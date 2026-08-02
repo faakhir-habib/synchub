@@ -377,7 +377,10 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
             <CardDescription>Pushes, merges, and conflicts for this project.</CardDescription>
           </CardHeader>
           <CardContent className="pt-0">
-            <ActivityFeed events={data.activity as ActivityEvent[]} />
+            {/* Capped height + internal scroll so a long feed doesn't grow the page. */}
+            <div className="max-h-[28rem] overflow-y-auto">
+              <ActivityFeed events={data.activity as ActivityEvent[]} />
+            </div>
           </CardContent>
         </Card>
 
