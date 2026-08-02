@@ -75,6 +75,9 @@ importers:
       express:
         specifier: ^4.21.2
         version: 4.22.1
+      prisma:
+        specifier: ^6.1.0
+        version: 6.19.3(typescript@5.9.3)
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
@@ -109,9 +112,6 @@ importers:
       '@types/ws':
         specifier: ^8.5.13
         version: 8.18.1
-      prisma:
-        specifier: ^6.1.0
-        version: 6.19.3(typescript@5.9.3)
       supertest:
         specifier: ^7.0.0
         version: 7.2.2

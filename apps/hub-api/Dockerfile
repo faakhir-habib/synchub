@@ -14,8 +14,18 @@
 #      correctly resolves the `@synchub/shared` workspace dependency (pnpm
 #      deploy hard-copies workspace deps instead of leaving pnpm's usual
 #      symlinks, which don't survive being copied into a fresh image layer).
-#      devDependencies are kept (no --prod) so the `prisma` CLI is present in
-#      the deploy output for `prisma migrate deploy` at container startup.
+#      `prisma` lives in hub-api's "dependencies" (not devDependencies) so a
+#      `--prod` deploy still keeps the CLI available for `prisma migrate
+#      deploy` at container startup, without pulling in dev-only tooling
+#      (eslint, nest CLI, vitest, etc).
+#
+# IMPORTANT: `pnpm deploy`'s node_modules is built from ABSOLUTE symlinks
+# (each `node_modules/<pkg>` -> literal `/app/deploy/node_modules/.pnpm/...`).
+# The deploy directory's path must therefore be IDENTICAL in both the builder
+# and runtime stages -- if runtime WORKDIR/COPY landed the contents anywhere
+# else (e.g. straight at `/app`), every one of those symlinks would dangle
+# and every `require()`/import (including the `prisma` CLI) would fail at
+# container start. Both stages use /app/deploy for exactly this reason.
 
 FROM node:22-slim AS builder
 
@@ -50,9 +60,10 @@ RUN pnpm --filter @synchub/shared build \
  && pnpm --filter @synchub/hub-api build
 
 # --- Flatten hub-api (+ its built workspace deps) into a self-contained deploy dir ---
-# No --prod: keeps devDependencies (notably the `prisma` CLI) available at
-# runtime for `prisma migrate deploy`.
-RUN pnpm --filter @synchub/hub-api deploy /app/deploy
+# --prod: only "dependencies" are installed. `prisma` is a dependency (not a
+# devDependency) of @synchub/hub-api specifically so the CLI survives this
+# prune -- it's needed at runtime for `prisma migrate deploy`.
+RUN pnpm --filter @synchub/hub-api --prod deploy /app/deploy
 
 # prisma/migrate deploy needs the schema + migrations; copy them explicitly
 # rather than relying on pnpm deploy's file-inclusion rules.
@@ -71,7 +82,9 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends openssl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# Must match the builder's deploy path exactly -- see the note at the top of
+# this file about pnpm deploy's absolute node_modules symlinks.
+WORKDIR /app/deploy
 
 COPY --from=builder /app/deploy ./
 COPY --from=builder /app/apps/hub-web/dist ./hub-web-dist
@@ -80,8 +93,11 @@ RUN chmod +x ./docker-entrypoint.sh
 
 ENV PORT=8080 \
     NODE_ENV=production \
-    WEB_DIST_DIR=/app/hub-web-dist
+    WEB_DIST_DIR=/app/deploy/hub-web-dist
 
 EXPOSE 8080
 
+# TODO: consider a non-root USER; left as root for now since /data volume
+# permissions for a single-container self-hosted setup aren't worth the
+# added complexity yet.
 ENTRYPOINT ["./docker-entrypoint.sh"]
