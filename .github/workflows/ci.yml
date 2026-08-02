@@ -1,0 +1,23 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main, rearchitecture-proper-app]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: "file:./dev.db"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable pnpm && corepack prepare pnpm@9.15.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @synchub/hub-api prisma:generate
+      - run: pnpm --filter @synchub/hub-api exec prisma migrate deploy
+      - run: pnpm lint
+      - run: pnpm build
+      - run: pnpm test

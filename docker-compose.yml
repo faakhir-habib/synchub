@@ -1,0 +1,21 @@
+services:
+  hub:
+    build:
+      context: .
+      dockerfile: apps/hub-api/Dockerfile
+    image: synchub
+    container_name: synchub
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      DATABASE_URL: "file:/data/synchub.db"
+      RELAY_STORE_DIR: "/data/relay-store"
+      # WEB_DIST_DIR is baked into the image (points at the built SPA); only
+      # override if you need to serve a different build.
+    volumes:
+      - synchub-data:/data
+
+volumes:
+  synchub-data:

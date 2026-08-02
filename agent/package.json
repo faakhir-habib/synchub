@@ -1,0 +1,25 @@
+{
+  "name": "synchub-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "synchub-agent": "src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js run",
+    "tray": "electron electron/main.js",
+    "test": "node --disable-warning=ExperimentalWarning --test"
+  },
+  "dependencies": {
+    "chokidar": "^4.0.1",
+    "node-notifier": "^10.0.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^43.2.0"
+  }
+}

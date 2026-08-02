@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Profile · SyncHub</title>
+  <link rel="stylesheet" href="assets/css/theme.css">
+</head>
+<body>
+<div class="app-shell">
+<aside class="sidebar">
+  <a class="brand" href="dashboard.html">
+    <div class="brand-mark"></div>
+    <div class="brand-copy"><strong>SyncHub</strong><span>Workspace sync</span></div>
+  </a>
+  <div class="nav-label">Workspace</div>
+  <nav class="nav">
+    <a class="nav-link" href="dashboard.html"><svg data-icon="dashboard"></svg><span>Dashboard</span></a>
+    <a class="nav-link" href="projects.html"><svg data-icon="folder"></svg><span>Projects</span></a>
+    <a class="nav-link" href="machines.html"><svg data-icon="monitor"></svg><span>Machines</span></a>
+    <a class="nav-link" href="conflicts.html"><svg data-icon="alert"></svg><span>Conflicts</span></a>
+  </nav>
+  <div class="nav-label">Account</div>
+  <nav class="nav">
+    <a class="nav-link" href="notifications.html"><svg data-icon="bell"></svg><span>Notifications</span></a>
+    <a class="nav-link" href="settings.html"><svg data-icon="settings"></svg><span>Settings</span></a>
+  </nav>
+  <div class="sidebar-bottom">
+    <div class="sidebar-status">
+      <div class="status-row"><span class="status-label">Sync service</span><span class="live-dot">Operational</span></div>
+      <div class="status-row"><span class="status-label">Last heartbeat</span><span>—</span></div>
+    </div>
+    <a class="nav-link" href="profile.html"><div class="avatar"></div><span></span><svg data-icon="chevron" style="margin-left:auto"></svg></a>
+  </div>
+</aside>
+<main class="main">
+<header class="topbar">
+  <div class="topbar-left">
+    <button class="mobile-menu" aria-label="Open navigation"><svg data-icon="menu"></svg></button>
+    <div><div class="page-kicker">Account</div><div class="page-title">Profile</div></div>
+  </div>
+  <div class="topbar-actions">
+    <a class="icon-button" href="notifications.html" aria-label="Notifications"><svg data-icon="bell"></svg><span class="notification-dot"></span></a>
+    <a class="user-chip" href="profile.html"><div class="avatar"></div><div class="user-meta"><strong></strong><span></span></div></a>
+  </div>
+</header><section class="content"><div class="page-heading"><div><h1>Profile</h1><p>Manage your identity and personal workspace preferences.</p></div><div class="heading-actions"><button class="btn" data-toast="Profile changes saved"><svg data-icon="check"></svg>Save changes</button></div></div>
+<div class="card">
+  <div class="profile-cover"></div>
+  <div class="profile-header"><div class="profile-identity"><div class="profile-avatar"></div><div class="profile-name"><h2></h2><p></p></div></div></div>
+</div>
+<div class="dashboard-grid">
+  <div class="card"><div class="card-head"><div><h2>Personal information</h2><p>Used across your SyncHub workspace</p></div></div><div class="card-body"><div class="form-grid"><div class="form-group"><label>Full name</label><input value="" placeholder="Your name"></div><div class="form-group"><label>Email address</label><input value="" disabled></div></div></div></div>
+  <div class="stack"><div class="card"><div class="card-head"><div><h3>Workspace access</h3></div></div><div class="card-body"><div class="status-row"><span class="status-label">Role</span><span>Administrator</span></div><div class="status-row"><span class="status-label">Projects</span><span>—</span></div><div class="status-row"><span class="status-label">Machines</span><span>—</span></div></div></div><div class="card"><div class="card-head"><div><h3>Account security</h3></div></div><div class="card-body"><p class="form-note">Your account is protected by your email + password.</p></div></div></div>
+</div>
+</section></main></div>
+<script src="assets/js/app.js"></script>
+<script type="module" src="/js/pages/profile.js"></script>
+</body>
+</html>
