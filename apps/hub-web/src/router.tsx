@@ -7,7 +7,8 @@ import {
 import { AppShell } from "./shell/AppShell.js";
 import { Dashboard } from "./routes/Dashboard.js";
 import { Projects } from "./routes/Projects.js";
-import { Machines, Conflicts, Notifications, Settings, ProjectDetailPlaceholder } from "./routes/Placeholders.js";
+import { ProjectDetail } from "./routes/ProjectDetail.js";
+import { Machines, Conflicts, Notifications, Settings } from "./routes/Placeholders.js";
 import { AuthGuard } from "./auth/AuthGuard.js";
 import { Login } from "./auth/Login.js";
 import { Signup } from "./auth/Signup.js";
@@ -44,7 +45,14 @@ const projectsRoute = createRoute({
 const projectDetailRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: "/projects/$id",
-  component: ProjectDetailPlaceholder,
+  // Parses the route param and hands it to the (test-friendly, prop-driven)
+  // ProjectDetail component. A non-numeric id becomes NaN here, which the
+  // API request turns into a 404 — already handled by ProjectDetail's
+  // not-found panel, so no extra validation is needed on this side.
+  component: function ProjectDetailRoute() {
+    const { id } = projectDetailRoute.useParams();
+    return <ProjectDetail projectId={Number(id)} />;
+  },
 });
 const machinesRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
