@@ -129,6 +129,15 @@ export function createApi({ hubUrl, machineToken }: { hubUrl: string; machineTok
           acceptStatuses: [409],
         },
       ),
+
+    /** Propagate a local delete to the Hub. Returns {status:"deleted"} on 200. */
+    deleteFile: (projectId: number | string, filename: string) =>
+      doRequest(
+        "POST",
+        `${hubUrl}/api/agent/delete/${projectId}`,
+        authHeaders,
+        { body: { filename } },
+      ),
   };
 }
 

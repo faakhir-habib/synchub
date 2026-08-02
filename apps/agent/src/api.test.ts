@@ -153,6 +153,36 @@ describe("api client", () => {
     });
   });
 
+  describe("deleteFile", () => {
+    it("POSTs filename and returns ok:true on 200", async () => {
+      const responseBody = { status: "deleted" };
+      fetchSpy.mockResolvedValue(
+        fakeResponse({ status: 200, body: JSON.stringify(responseBody) }) as unknown as Response,
+      );
+
+      const api = createApi({ hubUrl: HUB, machineToken: TOKEN });
+      const result = await api.deleteFile(7, "file.jsonl");
+
+      expect(result).toEqual({ ok: true, data: responseBody });
+      const [url, init] = fetchSpy.mock.calls[0]!;
+      expect(url).toBe(`${HUB}/api/agent/delete/7`);
+      const opts = init as RequestInit;
+      expect(opts.method).toBe("POST");
+      expect(JSON.parse(opts.body as string)).toEqual({ filename: "file.jsonl" });
+    });
+
+    it("returns unauthorized on 401", async () => {
+      fetchSpy.mockResolvedValue(
+        fakeResponse({ status: 401, ok: false, body: "" }) as unknown as Response,
+      );
+
+      const api = createApi({ hubUrl: HUB, machineToken: TOKEN });
+      const result = await api.deleteFile(7, "file.jsonl");
+
+      expect(result).toEqual({ ok: false, kind: "unauthorized" });
+    });
+  });
+
   describe("unauthorized", () => {
     it("returns a distinct unauthorized kind on 401 for any authed call", async () => {
       fetchSpy.mockResolvedValue(
