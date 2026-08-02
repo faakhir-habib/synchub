@@ -12,6 +12,10 @@ function makeDeps(overrides: Partial<Parameters<typeof cmdPair>[1]> = {}) {
     pairRedeem: vi.fn(),
     saveConfig: vi.fn(),
     loadConfig: vi.fn(),
+    runAgent: vi.fn(() => ({
+      stop: vi.fn(async () => {}),
+      whenIdle: vi.fn(async () => {}),
+    })),
     log: vi.fn(),
     ...overrides,
   };
@@ -126,23 +130,25 @@ describe("cmdVersion", () => {
 });
 
 describe("cmdRun", () => {
-  it("returns 1 and logs a not-paired message when unpaired (loadConfig -> null)", () => {
+  it("returns 1 and logs a not-paired message when unpaired (loadConfig -> null), without starting the agent", async () => {
     const deps = makeDeps({ loadConfig: vi.fn(() => null) });
 
-    const code = cmdRun(deps);
+    const code = await cmdRun(deps);
 
     expect(code).toBe(1);
     expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/not paired/i));
+    expect(deps.runAgent).not.toHaveBeenCalled();
   });
 
-  it("returns 0 and logs the Phase 4b stub message when paired", () => {
+  it("returns 0 and invokes runAgent with the loaded config when paired", async () => {
     const cfg: AgentConfig = { hubUrl: "http://hub:8080", machineToken: "tok", machineId: 7 };
     const deps = makeDeps({ loadConfig: vi.fn(() => cfg) });
 
-    const code = cmdRun(deps);
+    const code = await cmdRun(deps);
 
     expect(code).toBe(0);
-    expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/phase 4b/i));
+    expect(deps.runAgent).toHaveBeenCalledWith(cfg, expect.objectContaining({ log: deps.log }));
+    expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/agent running/i));
   });
 });
 
