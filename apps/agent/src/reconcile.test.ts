@@ -97,6 +97,27 @@ describe("reconcile", () => {
       expect(state.get(1, "a.jsonl")).toBe("hash-behind");
     });
 
+    it("merged/behind: writeFile failure after a successful pull is caught, logged, and swallowed (no throw)", async () => {
+      // localDir points at a FILE, not a directory, so join(localDir, filename)
+      // has a non-directory path segment and writeFile rejects (ENOTDIR/ENOENT).
+      mkdirSync(TEST_ROOT, { recursive: true });
+      const notADir = join(TEST_ROOT, `not-a-dir-${counter}`);
+      writeFileSync(notADir, "i am a file, not a directory");
+
+      const api = makeApi({
+        push: vi.fn(async () => ({ ok: true, data: { status: "behind", hash: "hash-behind" } })),
+        pull: vi.fn(async () => "canonical-content"),
+      });
+
+      await expect(
+        pushLocal(deps(api), 1, notADir, "a.jsonl", "local-content", "base-hash"),
+      ).resolves.not.toThrow();
+
+      expect(log).toHaveBeenCalled();
+      // Since the write failed, state must not have been advanced.
+      expect(state.get(1, "a.jsonl")).toBeNull();
+    });
+
     it("conflict: logs + notifies to resolve in Hub, no state change", async () => {
       const api = makeApi({
         push: vi.fn(async () => ({ ok: true, data: { status: "conflict", conflictId: 42 } })),
