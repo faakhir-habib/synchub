@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { AgentMapping } from "@synchub/shared";
 import type { Api } from "./api.js";
 import type { AgentState } from "./state.js";
+import type { TombstoneStore } from "./tombstones.js";
 import * as reconcileModule from "./reconcile.js";
 import { watchProjects, type WatcherFactory } from "./watcher.js";
 
@@ -67,6 +68,24 @@ function makeState(overrides: Partial<AgentState> = {}): AgentState {
   } as unknown as AgentState;
 }
 
+/** A minimal in-memory TombstoneStore fake — persistence itself is covered by tombstones.test.ts. */
+function makeTombstones(overrides: Partial<TombstoneStore> = {}): TombstoneStore {
+  const set = new Set<string>();
+  return {
+    has: vi.fn((key: string) => set.has(key)),
+    add: vi.fn((key: string) => {
+      set.add(key);
+    }),
+    delete: vi.fn((key: string) => {
+      set.delete(key);
+    }),
+    list: vi.fn(() => [...set]),
+    flush: vi.fn(),
+    close: vi.fn(),
+    ...overrides,
+  } as unknown as TombstoneStore;
+}
+
 describe("watchProjects", () => {
   let readFileMock: ReturnType<typeof vi.fn>;
   let pushLocalSpy: ReturnType<typeof vi.spyOn>;
@@ -128,7 +147,7 @@ describe("watchProjects", () => {
       queue as never,
       makeApi(),
       state,
-      new Set(),
+      makeTombstones(),
       mappings,
       { log, notify, watcherFactory },
     );
@@ -145,7 +164,7 @@ describe("watchProjects", () => {
     const state = makeState({ get: vi.fn(() => "base-hash-123") });
     const api = makeApi();
 
-    const handle = watchProjects(queue as never, api, state, new Set(), [m], {
+    const handle = watchProjects(queue as never, api, state, makeTombstones(), [m], {
       log,
       notify,
       debounceMs: 300,
@@ -185,7 +204,7 @@ describe("watchProjects", () => {
     const queue = makeQueue();
     const state = makeState();
 
-    const handle = watchProjects(queue as never, makeApi(), state, new Set(), [m], {
+    const handle = watchProjects(queue as never, makeApi(), state, makeTombstones(), [m], {
       log,
       notify,
       debounceMs: 300,
@@ -222,7 +241,7 @@ describe("watchProjects", () => {
     const queue = makeQueue();
     const state = makeState();
     const api = makeApi();
-    const tombstones = new Set<string>();
+    const tombstones = makeTombstones();
 
     const handle = watchProjects(queue as never, api, state, tombstones, [m], {
       log,
@@ -246,13 +265,42 @@ describe("watchProjects", () => {
     handle.close();
   });
 
+  it("unlink adds the tombstone EAGERLY — present immediately, before the enqueued delete job ever runs", async () => {
+    const m = mapping({ project_id: 1, local_path: "C:\\proj1" });
+    const watcher = makeFakeWatcher();
+    const queue = makeQueue();
+    const state = makeState();
+    const api = makeApi();
+    const tombstones = makeTombstones();
+
+    const handle = watchProjects(queue as never, api, state, tombstones, [m], {
+      log,
+      notify,
+      debounceMs: 300,
+      watcherFactory: () => watcher,
+    });
+
+    const path = join("C:\\proj1", "chat.jsonl");
+    watcher.emit("unlink", path);
+
+    // The delete job has been enqueued but NOT run yet — the tombstone
+    // must already be present, proving it was added synchronously at
+    // unlink time rather than inside the job's async success path (so the
+    // durable intent survives even if this job is later abandoned).
+    expect(queue.has("delete:1/chat.jsonl")).toBe(true);
+    expect(api.deleteFile).not.toHaveBeenCalled();
+    expect(tombstones.has("1/chat.jsonl")).toBe(true);
+
+    handle.close();
+  });
+
   it("ignores non-.jsonl paths on add/change/unlink", async () => {
     const m = mapping({ project_id: 1, local_path: "C:\\proj1" });
     const watcher = makeFakeWatcher();
     const queue = makeQueue();
     const state = makeState();
 
-    const handle = watchProjects(queue as never, makeApi(), state, new Set(), [m], {
+    const handle = watchProjects(queue as never, makeApi(), state, makeTombstones(), [m], {
       log,
       notify,
       debounceMs: 300,

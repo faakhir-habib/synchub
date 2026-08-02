@@ -9,11 +9,16 @@
 //     that one project even if it's "manual" — but never "stopped"
 //     (audit #11).
 //   - async file I/O via fs/promises (audit #15).
-//   - tombstone-aware: won't re-pull a file the agent itself just deleted
-//     (resurrection fix, audit #5). This module only *reads* the
-//     tombstone set — later tasks (watcher/agent) own adding/removing
-//     entries as local deletes are propagated and later observed as
-//     absent from a fresh manifest.
+//   - tombstone-aware (durability fix, audit #5): a tombstoned filename is
+//     never pulled or pushed. While the Hub still lists it, reconcile
+//     re-attempts the delete (idempotent — covers a delete job abandoned
+//     on a prior shutdown). Once the Hub confirms it's gone (absent from a
+//     fresh manifest), the tombstone is pruned so a legitimately re-created
+//     same-named file can sync normally again. Tombstones themselves are
+//     added eagerly by the watcher/agent on an observed local unlink or a
+//     Hub "deleted" WS frame, and persisted (survive restart) via
+//     TombstoneStore — this module reads AND prunes/re-attempts, but never
+//     adds one itself.
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -22,15 +27,16 @@ import type { AgentMapping } from "@synchub/shared";
 import type { Api } from "./api.js";
 import { isSafeFilename } from "./safe-filename.js";
 import type { AgentState } from "./state.js";
+import type { TombstoneStore } from "./tombstones.js";
 import { hashContent } from "./hasher.js";
 
 /** Keys are `${projectId}/${filename}` for files the agent itself deleted locally. */
-export type Tombstones = Set<string>;
+export type Tombstones = TombstoneStore;
 
 export interface ReconcileDeps {
   api: Api;
   state: AgentState;
-  tombstones: Tombstones;
+  tombstones: TombstoneStore;
   log: (message: string) => void;
   notify: (title: string, message: string) => void;
   /** Called when any Hub call reports an unauthorized machine token. */
@@ -142,10 +148,10 @@ export async function pushLocal(
 
 /**
  * Reconcile one project: pull Hub-only files, push local-only/changed
- * files, and skip files this agent has a tombstone for (so a Hub manifest
- * entry that hasn't caught up to a local delete doesn't get resurrected
- * locally). Tolerant of a failed manifest fetch and of any single bad
- * file — neither aborts the rest of the project.
+ * files, and handle tombstoned files (never pulled/pushed — see the
+ * module-level comment for the re-attempt/prune lifecycle). Tolerant of a
+ * failed manifest fetch and of any single bad file — neither aborts the
+ * rest of the project.
  */
 export async function reconcileProject(deps: ReconcileDeps, target: ProjectTarget): Promise<void> {
   const { api, state, tombstones, log } = deps;
@@ -160,18 +166,29 @@ export async function reconcileProject(deps: ReconcileDeps, target: ProjectTarge
 
   const man = await api.getManifest(projectId);
   if (!man.ok) {
+    if (man.kind === "unauthorized") deps.onUnauthorized?.();
     log(`manifest ${projectId} failed: ${man.kind}`);
     return;
   }
 
   const manifest = new Map(man.data.map((f) => [f.filename, f]));
   const local = await localFiles(localPath);
-  const names = new Set([...manifest.keys(), ...Object.keys(local)]);
+  // Fold in this project's currently-tombstoned filenames too: a fully
+  // confirmed delete (Hub no longer lists it AND it's gone locally) would
+  // otherwise never appear in manifest/local at all, so it would never be
+  // visited below to get pruned — it'd sit in the store forever.
+  const prefix = `${projectId}/`;
+  const tombstonedFilenames = tombstones
+    .list()
+    .filter((k) => k.startsWith(prefix))
+    .map((k) => k.slice(prefix.length));
+  const names = new Set([...manifest.keys(), ...Object.keys(local), ...tombstonedFilenames]);
 
   for (const filename of names) {
     try {
       const hub = manifest.get(filename);
       const loc = local[filename];
+      const key = `${projectId}/${filename}`;
 
       // hub-supplied (manifest) filenames are untrusted: reject anything
       // that could escape localPath via join() before it's ever pulled or
@@ -181,9 +198,38 @@ export async function reconcileProject(deps: ReconcileDeps, target: ProjectTarge
         continue;
       }
 
+      if (tombstones.has(key)) {
+        // Never pull or push a tombstoned file, regardless of local
+        // presence — this module never deletes a LOCAL file, and only
+        // ever re-attempts a hub delete that's already carried by an
+        // explicit, previously-observed tombstone (no mass-delete on a
+        // vanished folder).
+        if (hub) {
+          // The Hub still lists it — either the original delete job never
+          // reached the Hub, or it was abandoned on a prior shutdown.
+          // Re-attempting is idempotent (api.deleteFile on an
+          // already-absent file is a no-op success on the Hub side).
+          const r = await api.deleteFile(projectId, filename);
+          if (r.ok) {
+            state.del(projectId, filename);
+            log(`re-propagated delete ${key}`);
+          } else if (r.kind === "unauthorized") {
+            deps.onUnauthorized?.();
+          } else {
+            log(`delete re-attempt failed ${key}: ${r.kind}`);
+          }
+        } else {
+          // The Hub no longer has it — the delete is confirmed. Prune the
+          // tombstone so a future legitimately re-created same-named file
+          // syncs normally instead of being blocked forever.
+          tombstones.delete(key);
+          log(`delete confirmed, tombstone pruned ${key}`);
+        }
+        continue;
+      }
+
       if (hub && !loc) {
-        // Hub-only. Don't resurrect a file this agent just deleted locally.
-        if (tombstones.has(`${projectId}/${filename}`)) continue;
+        // Hub-only (and not tombstoned — handled above).
         const content = await api.pull(projectId, filename);
         if (content != null) {
           await writeFile(join(localPath, filename), content);
@@ -224,6 +270,7 @@ export async function reconcileAll(deps: ReconcileDeps, trigger: ReconcileTrigge
   const { api, log } = deps;
   const res = await api.getMappings();
   if (!res.ok) {
+    if (res.kind === "unauthorized") deps.onUnauthorized?.();
     log(`mappings failed: ${res.kind}`);
     return;
   }

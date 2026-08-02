@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { createState } from "./state.js";
+import { createTombstones, type TombstoneStore } from "./tombstones.js";
 import { hashContent } from "./hasher.js";
 import type { Api } from "./api.js";
 import type { AgentMapping, ManifestEntry } from "@synchub/shared";
@@ -25,8 +26,9 @@ describe("reconcile", () => {
   let counter = 0;
   let localDir: string;
   let stateFile: string;
+  let tombstoneFile: string;
   let state: ReturnType<typeof createState>;
-  let tombstones: Set<string>;
+  let tombstones: TombstoneStore;
   let log: ReturnType<typeof vi.fn>;
   let notify: ReturnType<typeof vi.fn>;
 
@@ -34,15 +36,17 @@ describe("reconcile", () => {
     counter += 1;
     localDir = join(TEST_ROOT, `local-${counter}`);
     stateFile = join(TEST_ROOT, `state-${counter}.json`);
+    tombstoneFile = join(TEST_ROOT, `tombstones-${counter}.json`);
     mkdirSync(TEST_ROOT, { recursive: true });
     state = createState(stateFile);
-    tombstones = new Set();
+    tombstones = createTombstones(tombstoneFile);
     log = vi.fn();
     notify = vi.fn();
   });
 
   afterEach(() => {
     state.close();
+    tombstones.close();
     rmSync(TEST_ROOT, { recursive: true, force: true });
   });
 
@@ -217,18 +221,60 @@ describe("reconcile", () => {
       expect(push).toHaveBeenCalledWith(1, "diff.jsonl", localContent, "previous-base-hash");
     });
 
-    it("tombstoned hub file: does not pull/write it (resurrection prevented)", async () => {
+    it("tombstoned hub file: does not pull/write it, and re-attempts the hub delete", async () => {
       const manifest: ManifestEntry[] = [
         { filename: "deleted.jsonl", hash: "hub-hash", size: 10, updated_at: "x" },
       ];
       const pull = vi.fn(async () => "should-not-be-written");
-      const api = makeApi({ getManifest: vi.fn(async () => ({ ok: true, data: manifest })), pull });
+      const deleteFile = vi.fn(async () => ({ ok: true, data: { status: "deleted" } }));
+      const api = makeApi({
+        getManifest: vi.fn(async () => ({ ok: true, data: manifest })),
+        pull,
+        deleteFile,
+      });
       tombstones.add("1/deleted.jsonl");
 
       await reconcileProject(deps(api), { projectId: 1, localPath: localDir });
 
       expect(pull).not.toHaveBeenCalled();
       expect(existsSync(join(localDir, "deleted.jsonl"))).toBe(false);
+      expect(deleteFile).toHaveBeenCalledWith(1, "deleted.jsonl");
+      // Still tombstoned: the Hub delete was only just re-attempted, not
+      // yet confirmed by a fresh manifest that no longer lists the file.
+      expect(tombstones.has("1/deleted.jsonl")).toBe(true);
+    });
+
+    it("tombstoned file no longer on the Hub: prunes the tombstone and writes nothing", async () => {
+      const pull = vi.fn(async () => "should-not-be-written");
+      const api = makeApi({ getManifest: vi.fn(async () => ({ ok: true, data: [] })), pull });
+      tombstones.add("1/deleted.jsonl");
+
+      await reconcileProject(deps(api), { projectId: 1, localPath: localDir });
+
+      expect(pull).not.toHaveBeenCalled();
+      expect(existsSync(join(localDir, "deleted.jsonl"))).toBe(false);
+      expect(tombstones.has("1/deleted.jsonl")).toBe(false);
+    });
+
+    it("after a tombstone is pruned, a fresh manifest entry with that same filename (no tombstone) is pulled normally", async () => {
+      // First pass: hub no longer lists it -> tombstone gets pruned.
+      const api1 = makeApi({ getManifest: vi.fn(async () => ({ ok: true, data: [] })) });
+      tombstones.add("1/recreated.jsonl");
+      await reconcileProject(deps(api1), { projectId: 1, localPath: localDir });
+      expect(tombstones.has("1/recreated.jsonl")).toBe(false);
+
+      // Second pass: a legitimately re-created same-named file now on the Hub.
+      const manifest: ManifestEntry[] = [
+        { filename: "recreated.jsonl", hash: "new-hub-hash", size: 3, updated_at: "y" },
+      ];
+      const pull = vi.fn(async () => "brand-new-content");
+      const api2 = makeApi({ getManifest: vi.fn(async () => ({ ok: true, data: manifest })), pull });
+
+      await reconcileProject(deps(api2), { projectId: 1, localPath: localDir });
+
+      expect(pull).toHaveBeenCalledWith(1, "recreated.jsonl");
+      expect(readFileSync(join(localDir, "recreated.jsonl"), "utf8")).toBe("brand-new-content");
+      expect(state.get(1, "recreated.jsonl")).toBe("new-hub-hash");
     });
 
     it("manifest entry with an unsafe (path-traversal) filename is skipped: no writeFile", async () => {
@@ -251,6 +297,17 @@ describe("reconcile", () => {
 
       await expect(reconcileProject(deps(api), { projectId: 1, localPath: localDir })).resolves.not.toThrow();
       expect(log).toHaveBeenCalled();
+    });
+
+    it("getManifest unauthorized: surfaces onUnauthorized", async () => {
+      const api = makeApi({ getManifest: vi.fn(async () => ({ ok: false, kind: "unauthorized" })) });
+      const onUnauthorized = vi.fn();
+
+      await expect(
+        reconcileProject(deps(api, { onUnauthorized }), { projectId: 1, localPath: localDir }),
+      ).resolves.not.toThrow();
+
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -319,6 +376,17 @@ describe("reconcile", () => {
 
       await expect(reconcileAll(deps(api), { trigger: "auto" })).resolves.not.toThrow();
       expect(log).toHaveBeenCalled();
+    });
+
+    it("getMappings unauthorized: surfaces onUnauthorized", async () => {
+      const api = makeApi({ getMappings: vi.fn(async () => ({ ok: false, kind: "unauthorized" })) });
+      const onUnauthorized = vi.fn();
+
+      await expect(
+        reconcileAll(deps(api, { onUnauthorized }), { trigger: "auto" }),
+      ).resolves.not.toThrow();
+
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
   });
 });

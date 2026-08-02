@@ -7,12 +7,13 @@
 //     before syncing. Here we drop awaitWriteFinish entirely and rely
 //     solely on a short internal debounce (default 300ms) per path, so
 //     appends sync promptly while still coalescing bursty writes.
-//   - unlink handling (audit #5/#12): a local delete enqueues a delete
-//     job (via api.deleteFile) instead of being silently ignored, and
-//     tombstones the file so a stale Hub manifest entry doesn't get
-//     resurrected by reconcile before the Hub catches up. Pruning
-//     tombstones over time is a later concern (agent Task 5+) — this
-//     module only adds them.
+//   - unlink handling (audit #5/#12): a local delete tombstones the file
+//     EAGERLY (synchronously, before/at enqueue time) so the durable
+//     intent survives even if the enqueued delete job never runs (e.g.
+//     abandoned on shutdown) — reconcile re-attempts the Hub delete on a
+//     later pass. The enqueued job then calls api.deleteFile + state.del.
+//     Pruning stale tombstones once the Hub confirms the delete is
+//     reconcile's job, not this module's.
 //   - bounded debounce-timer map (audit #13): each per-path timer entry
 //     is deleted from the Map as soon as it fires, so the map never grows
 //     unbounded across a long-running watch session.
@@ -28,9 +29,9 @@ import type { AgentMapping } from "@synchub/shared";
 
 import type { Api } from "./api.js";
 import { pushLocal } from "./reconcile.js";
-import type { Tombstones } from "./reconcile.js";
 import type { SyncQueue } from "./sync-queue.js";
 import type { AgentState } from "./state.js";
+import type { TombstoneStore } from "./tombstones.js";
 
 /** Minimal shape needed from a watcher instance — satisfied by chokidar's FSWatcher and by test fakes. */
 export interface WatchHandle {
@@ -67,7 +68,7 @@ export function watchProjects(
   queue: SyncQueue,
   api: Api,
   state: AgentState,
-  tombstones: Tombstones,
+  tombstones: TombstoneStore,
   mappings: AgentMapping[],
   opts: WatchProjectsOptions,
 ): WatchHandleResult {
@@ -126,18 +127,25 @@ export function watchProjects(
       const filename = basename(path);
       if (!filename.endsWith(".jsonl")) return;
 
+      // Tombstone EAGERLY — synchronously, at the moment the unlink is
+      // observed, not only once the enqueued delete job succeeds. This
+      // makes the delete intent durable even if the job below never runs
+      // (e.g. the agent is stopped before the queue drains it): reconcile
+      // will see the persisted tombstone on a later pass and re-attempt
+      // the Hub delete itself (audit #5).
+      tombstones.add(`${m.project_id}/${filename}`);
+
       queue.enqueue(`delete:${m.project_id}/${filename}`, async () => {
         const res = await api.deleteFile(m.project_id, filename);
         if (res.ok) {
           state.del(m.project_id, filename);
-          // Tombstone the local-originated delete so reconcile doesn't
-          // resurrect it from a Hub manifest that hasn't caught up yet
-          // (audit #5). Pruning stale tombstones is a later concern.
-          tombstones.add(`${m.project_id}/${filename}`);
           log(`deleted ${filename}`);
         } else if (res.kind === "unauthorized") {
           onUnauthorized?.();
         } else {
+          // Leave state as-is (reconcile re-derives it) — the tombstone
+          // added above stays put; it's the durable intent, and reconcile
+          // will keep re-attempting the Hub delete on later passes.
           log(`delete ${filename} failed: ${res.kind}`);
         }
       });

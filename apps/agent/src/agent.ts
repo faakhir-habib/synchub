@@ -25,10 +25,12 @@ import type { Api } from "./api.js";
 import type { AgentConfig } from "./config.js";
 import { createNotifier } from "./notifier.js";
 import { reconcileAll, reconcileProject } from "./reconcile.js";
-import type { ReconcileDeps, Tombstones } from "./reconcile.js";
+import type { ReconcileDeps } from "./reconcile.js";
 import { isSafeFilename } from "./safe-filename.js";
 import { createState } from "./state.js";
 import type { AgentState } from "./state.js";
+import { createTombstones } from "./tombstones.js";
+import type { TombstoneStore } from "./tombstones.js";
 import { SyncQueue } from "./sync-queue.js";
 import { connectWs } from "./ws.js";
 import type { WsFactory, WsHandle } from "./ws.js";
@@ -37,10 +39,13 @@ import type { WatcherFactory, WatchHandleResult } from "./watcher.js";
 
 export interface RunAgentOptions {
   statePath?: string;
+  /** Path to the persisted tombstone store. Defaults to tombstonePath(); overridable for tests, mirroring statePath. */
+  tombstonePath?: string;
   log?: (message: string) => void;
   notify?: (title: string, message: string) => void;
   apiFactory?: (cfg: { hubUrl: string; machineToken: string }) => Api;
   stateFactory?: (path?: string) => AgentState;
+  tombstoneFactory?: (path?: string) => TombstoneStore;
   watcherFactory?: WatcherFactory;
   wsFactory?: WsFactory;
   /** Periodic reconcile + mapping-refresh interval. Default 30000ms. */
@@ -70,7 +75,7 @@ export function runAgent(cfg: AgentConfig, opts: RunAgentOptions = {}): AgentHan
   const notify = opts.notify ?? createNotifier(cfg.notifications !== false).notify;
   const api = (opts.apiFactory ?? createApi)(cfg);
   const state = (opts.stateFactory ?? createState)(opts.statePath);
-  const tombstones: Tombstones = new Set<string>();
+  const tombstones: TombstoneStore = (opts.tombstoneFactory ?? createTombstones)(opts.tombstonePath);
 
   const queue = new SyncQueue({
     onError: (err, key) => log(`queue task "${key}" failed: ${String(err)}`),
@@ -136,11 +141,20 @@ export function runAgent(cfg: AgentConfig, opts: RunAgentOptions = {}): AgentHan
 
       case "deleted": {
         const { projectId, filename } = msg;
+        if (!isSafeFilename(filename)) {
+          log(`deleted: unsafe filename "${filename}" from project ${projectId} — skipped (possible traversal)`);
+          return;
+        }
+
+        // Tombstone EAGERLY — synchronously, before the job below is even
+        // enqueued — so the durable intent survives even if that job is
+        // later abandoned (e.g. still pending, dropped by SyncQueue.close()
+        // on shutdown, never having run): reconcile will see the persisted
+        // tombstone on its next pass regardless and re-attempt the Hub
+        // delete itself (audit #5).
+        tombstones.add(`${projectId}/${filename}`);
+
         queue.enqueue(`delete:${projectId}/${filename}`, async () => {
-          if (!isSafeFilename(filename)) {
-            log(`deleted: unsafe filename "${filename}" from project ${projectId} — skipped (possible traversal)`);
-            return;
-          }
           const m = findMapping(projectId);
           if (!m) {
             log(`deleted: project ${projectId} isn't mapped locally — skipped`);
@@ -150,9 +164,6 @@ export function runAgent(cfg: AgentConfig, opts: RunAgentOptions = {}): AgentHan
             // Already gone / never existed locally — fine, that's the goal.
           });
           state.del(projectId, filename);
-          // Tombstone so a Hub manifest that hasn't caught up doesn't
-          // resurrect the file via reconcile (audit #5).
-          tombstones.add(`${projectId}/${filename}`);
           log(`removed ${filename} (deleted on Hub)`);
         });
         return;
@@ -253,6 +264,7 @@ export function runAgent(cfg: AgentConfig, opts: RunAgentOptions = {}): AgentHan
       watcher.close();
       await queue.close();
       state.close();
+      tombstones.close();
     },
   };
 }
