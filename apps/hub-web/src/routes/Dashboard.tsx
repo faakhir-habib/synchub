@@ -10,32 +10,15 @@ import {
   HardDrive,
   Gauge,
   Files,
-  TriangleAlert,
 } from "lucide-react";
 import { getMetrics, getActivity } from "@/lib/endpoints";
 import { qk } from "@/lib/query-keys";
-import { ApiError } from "@/lib/api-error";
 import { StatCard } from "@/components/StatCard";
 import { ActivityFeed } from "@/components/ActivityFeed";
+import { ErrorPanel } from "@/components/ErrorPanel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { fmtBytes } from "@/lib/format";
-
-function errorMessage(error: unknown): string {
-  return error instanceof ApiError ? error.message : "Something went wrong. Please try again.";
-}
-
-function ErrorPanel({ error }: { error: unknown }) {
-  return (
-    <div
-      role="alert"
-      className="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
-    >
-      <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-      <span>{errorMessage(error)}</span>
-    </div>
-  );
-}
 
 function EngineStat({
   label,

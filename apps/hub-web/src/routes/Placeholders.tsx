@@ -15,11 +15,13 @@ function PlaceholderPage({ title, blurb }: { title: string; blurb: string }) {
   );
 }
 
-export function Projects() {
+// Real screen lives in routes/Projects.tsx (Phase 3b Task 2). The detail
+// route (/projects/$id) stays a placeholder until Task 3.
+export function ProjectDetailPlaceholder() {
   return (
     <PlaceholderPage
-      title="Projects"
-      blurb="Every synced project, its machines, and its sync mode — create, configure, and manage from here."
+      title="Project detail"
+      blurb="Mappings, conflicts, and sync controls for this project."
     />
   );
 }

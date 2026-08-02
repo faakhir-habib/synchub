@@ -6,7 +6,8 @@ import {
 } from "@tanstack/react-router";
 import { AppShell } from "./shell/AppShell.js";
 import { Dashboard } from "./routes/Dashboard.js";
-import { Projects, Machines, Conflicts, Notifications, Settings } from "./routes/Placeholders.js";
+import { Projects } from "./routes/Projects.js";
+import { Machines, Conflicts, Notifications, Settings, ProjectDetailPlaceholder } from "./routes/Placeholders.js";
 import { AuthGuard } from "./auth/AuthGuard.js";
 import { Login } from "./auth/Login.js";
 import { Signup } from "./auth/Signup.js";
@@ -39,6 +40,11 @@ const projectsRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: "/projects",
   component: Projects,
+});
+const projectDetailRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: "/projects/$id",
+  component: ProjectDetailPlaceholder,
 });
 const machinesRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
@@ -76,6 +82,7 @@ const routeTree = rootRoute.addChildren([
   appLayoutRoute.addChildren([
     indexRoute,
     projectsRoute,
+    projectDetailRoute,
     machinesRoute,
     conflictsRoute,
     notificationsRoute,
