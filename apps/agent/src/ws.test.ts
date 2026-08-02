@@ -165,7 +165,7 @@ describe("connectWs", () => {
     handle.close();
   });
 
-  it("reconnects on unexpected close with exponential backoff capped at 30s, resetting to base after a stable open", async () => {
+  it("reconnects on unexpected close with exponential backoff capped at 30s, resetting to base only after a STABLE open (past the 5s threshold)", async () => {
     const sockets: ReturnType<typeof makeFakeWs>[] = [];
     const wsFactory: WsFactory = () => {
       const s = makeFakeWs();
@@ -201,13 +201,57 @@ describe("connectWs", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(sockets).toHaveLength(4);
 
-    // A stable open resets the delay back to base (~1000ms).
+    // A STABLE open (held open past the 5s threshold) resets the delay
+    // back to base (~1000ms). Closing right after the open, before 5s
+    // elapses, would NOT reset it (covered by the flap test below).
     sockets[3]!.emit("open");
+    await vi.advanceTimersByTimeAsync(5000);
     sockets[3]!.emit("close");
     await vi.advanceTimersByTimeAsync(999);
     expect(sockets).toHaveLength(4);
     await vi.advanceTimersByTimeAsync(1);
     expect(sockets).toHaveLength(5);
+
+    handle.close();
+  });
+
+  it("a flap (open then immediate close, before the 5s stable threshold, repeated) makes the backoff delay GROW, not reset to base", async () => {
+    const sockets: ReturnType<typeof makeFakeWs>[] = [];
+    const wsFactory: WsFactory = () => {
+      const s = makeFakeWs();
+      sockets.push(s);
+      return s;
+    };
+
+    const handle = connectWs(
+      { hubUrl: "http://hub", machineToken: "tok" },
+      { onMessage: vi.fn(), log, wsFactory },
+    );
+
+    // Flap 1: open then immediately close (never reaches the 5s stable
+    // threshold) -> delay escalates from base (1000) to 2000, NOT reset.
+    sockets[0]!.emit("open");
+    sockets[0]!.emit("close");
+    await vi.advanceTimersByTimeAsync(999);
+    expect(sockets).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sockets).toHaveLength(2);
+
+    // Flap 2: same thing -> delay escalates 2000 -> 4000, still no reset.
+    sockets[1]!.emit("open");
+    sockets[1]!.emit("close");
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(sockets).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sockets).toHaveLength(3);
+
+    // Flap 3: confirms continued growth 4000 -> 8000 (never settles at 1s).
+    sockets[2]!.emit("open");
+    sockets[2]!.emit("close");
+    await vi.advanceTimersByTimeAsync(3999);
+    expect(sockets).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sockets).toHaveLength(4);
 
     handle.close();
   });

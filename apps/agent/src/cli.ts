@@ -89,11 +89,19 @@ export function cmdVersion(deps: Pick<CliDeps, "log">): number {
  * Start the sync engine: boot the agent (reconcile, watch, connect WS) and
  * keep running until SIGINT/SIGTERM. Returns 1 immediately if unpaired.
  *
- * Deliberately does NOT block on a never-resolving promise to stay alive —
- * the agent's own live handles (the open WS socket, the chokidar watchers)
- * are real OS handles that keep Node's event loop alive on their own, so
- * resolving here (once boot is wired up) is enough. SIGINT/SIGTERM call
- * `handle.stop()` (closing those handles) and then exit explicitly.
+ * Installs its own ref'd keepalive interval rather than relying on
+ * runAgent's internal handles (the WS socket, chokidar watchers, the 30s
+ * tick) to keep the event loop alive: those are all deliberately unref'd
+ * (so unit tests can finish without waiting on them), and there may be
+ * ZERO of them at all — e.g. a paired-but-revoked-token agent has no auto
+ * mappings, so no watchers are started, and once the WS's first connection
+ * attempt closes there's nothing ref'd left. Without a daemon-level
+ * keepalive, Node's event loop would drain and the process would exit
+ * silently right after logging "Agent running", even though nothing
+ * actually failed loudly — hiding the "re-pair this machine" guidance
+ * that should otherwise keep appearing on every reconcile tick. SIGINT/
+ * SIGTERM still call `handle.stop()`, clear the keepalive, and exit
+ * explicitly.
  */
 export async function cmdRun(deps: Pick<CliDeps, "loadConfig" | "log" | "runAgent">): Promise<number> {
   const cfg = deps.loadConfig();
@@ -104,11 +112,18 @@ export async function cmdRun(deps: Pick<CliDeps, "loadConfig" | "log" | "runAgen
 
   const handle = deps.runAgent(cfg, { log: deps.log });
 
+  // ~12 days — effectively "forever" for a no-op interval. Intentionally
+  // NOT unref()'d: this is the one handle whose entire job is to keep the
+  // process alive regardless of what runAgent's own (unref'd) handles are
+  // doing.
+  const keepAlive = setInterval(() => {}, 1 << 30);
+
   let stopping = false;
   const shutdown = (): void => {
     if (stopping) return;
     stopping = true;
     deps.log("shutting down...");
+    clearInterval(keepAlive);
     handle
       .stop()
       .catch((err: unknown) => deps.log(`error during shutdown: ${String(err)}`))
