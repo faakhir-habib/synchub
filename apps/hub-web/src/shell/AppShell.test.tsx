@@ -13,10 +13,11 @@ import { AppShell } from "./AppShell.js";
 import { AuthProvider } from "../auth/auth-context.js";
 import { ThemeProvider } from "../theme/theme-provider.js";
 
-const { getMeMock, logoutMock, setAuthTokenMock } = vi.hoisted(() => ({
+const { getMeMock, logoutMock, setAuthTokenMock, getNotificationsMock } = vi.hoisted(() => ({
   getMeMock: vi.fn(),
   logoutMock: vi.fn(),
   setAuthTokenMock: vi.fn(),
+  getNotificationsMock: vi.fn(),
 }));
 
 vi.mock("../lib/endpoints.js", () => ({
@@ -24,6 +25,9 @@ vi.mock("../lib/endpoints.js", () => ({
   signup: vi.fn(),
   logout: logoutMock,
   getMe: getMeMock,
+  // Topbar (rendered as part of AppShell) reads qk.notifications for its
+  // live bell badge — see shell/Topbar.tsx and routes/Notifications.tsx.
+  getNotifications: getNotificationsMock,
 }));
 
 vi.mock("../lib/api.js", () => ({
@@ -96,6 +100,7 @@ beforeEach(() => {
   getMeMock.mockReset().mockResolvedValue(ME);
   logoutMock.mockReset().mockResolvedValue({ ok: true });
   setAuthTokenMock.mockReset();
+  getNotificationsMock.mockReset().mockResolvedValue({ unread: 0, items: [] });
 
   // jsdom has no matchMedia implementation — ThemeProvider (and the topbar's
   // theme toggle) call it unconditionally when theme === "system".

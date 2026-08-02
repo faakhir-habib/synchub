@@ -1,7 +1,10 @@
 import { useNavigate } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { Bell, Menu, Moon, Sun, LogOut, Settings as SettingsIcon, ChevronDown } from "lucide-react";
 import { useAuth } from "@/auth/auth-context";
 import { useTheme, type Theme } from "@/theme/theme-provider";
+import { getNotifications } from "@/lib/endpoints";
+import { qk } from "@/lib/query-keys";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -27,10 +30,21 @@ export function Topbar({ onMenuClick }: TopbarProps) {
   const { user, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
+  // staleTime keeps this from refetching on every focus/mount across the
+  // shell — the count still stays live because RealtimeProvider invalidates
+  // qk.notifications on every WS `notification` frame, which bypasses
+  // staleTime and refetches immediately.
+  const { data: notifs } = useQuery({
+    queryKey: qk.notifications,
+    queryFn: getNotifications,
+    staleTime: 30_000,
+  });
 
   const displayName = user?.name || user?.email || "Account";
   const initial = displayName.trim().charAt(0).toUpperCase() || "?";
   const isDark = resolveIsDark(theme);
+  const unread = notifs?.unread ?? 0;
+  const unreadLabel = unread > 9 ? "9+" : String(unread);
 
   async function handleLogout() {
     await logout();
@@ -59,7 +73,11 @@ export function Topbar({ onMenuClick }: TopbarProps) {
         onClick={() => navigate({ to: "/notifications" })}
       >
         <Bell className="h-[18px] w-[18px]" />
-        <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-destructive ring-2 ring-background" />
+        {unread > 0 && (
+          <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-[1rem] place-items-center rounded-full bg-destructive px-1 font-mono text-[10px] font-bold leading-none text-destructive-foreground ring-2 ring-background">
+            {unreadLabel}
+          </span>
+        )}
       </Button>
 
       <Button
