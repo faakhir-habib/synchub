@@ -58,7 +58,12 @@ jobs:
       - name: Smoke test binary (--version)
         shell: bash
         run: |
-          out="$(./staging/${{ matrix.asset }} --version)"
+          set -o pipefail
+          # Must exit 0 AND print a version — a broken SEA build fails CI here, not users.
+          if ! out="$(./staging/${{ matrix.asset }} --version)"; then
+            echo "::error::--version exited non-zero"
+            exit 1
+          fi
           echo "version output: $out"
           if [ -z "$out" ]; then
             echo "::error::--version produced no output"
