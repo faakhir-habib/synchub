@@ -1,5 +1,8 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // "native" for local dev; "debian-openssl-3.0.x" for the node:22-slim (bookworm)
+  // Docker runtime — the query-engine binary must match the deployment OS/openssl.
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
