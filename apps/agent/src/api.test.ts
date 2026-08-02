@@ -10,16 +10,21 @@ function fakeResponse({
   ok,
   body,
   jsonThrows = false,
+  textRejects = false,
 }: {
   status: number;
   ok?: boolean;
   body?: string;
   jsonThrows?: boolean;
+  textRejects?: boolean;
 }) {
   return {
     status,
     ok: ok ?? (status >= 200 && status < 300),
-    text: async () => body ?? "",
+    text: async () => {
+      if (textRejects) throw new Error("ECONNRESET while reading body");
+      return body ?? "";
+    },
     json: async () => {
       if (jsonThrows) throw new Error("invalid json");
       return body ? JSON.parse(body) : null;
@@ -156,6 +161,15 @@ describe("api client", () => {
 
       expect(result).toEqual({ ok: false, kind: "parse" });
     });
+
+    it("returns kind:'parse' (not ok:true/undefined) on an empty 2xx body when a schema is expected", async () => {
+      fetchSpy.mockResolvedValue(fakeResponse({ status: 200, body: "" }) as unknown as Response);
+
+      const api = createApi({ hubUrl: HUB, machineToken: TOKEN });
+      const result = await api.getMappings();
+
+      expect(result).toEqual({ ok: false, kind: "parse" });
+    });
   });
 
   describe("5xx", () => {
@@ -195,6 +209,28 @@ describe("api client", () => {
 
       expect(result).toEqual({ ok: false, kind: "network" });
     });
+
+    it("returns kind:'network' (not a throw) when the body read rejects mid-stream on getMappings", async () => {
+      fetchSpy.mockResolvedValue(
+        fakeResponse({ status: 200, textRejects: true }) as unknown as Response,
+      );
+
+      const api = createApi({ hubUrl: HUB, machineToken: TOKEN });
+      const result = await api.getMappings();
+
+      expect(result).toEqual({ ok: false, kind: "network" });
+    });
+
+    it("returns kind:'network' (not a throw) when the body read rejects mid-stream on getManifest", async () => {
+      fetchSpy.mockResolvedValue(
+        fakeResponse({ status: 200, textRejects: true }) as unknown as Response,
+      );
+
+      const api = createApi({ hubUrl: HUB, machineToken: TOKEN });
+      const result = await api.getManifest(1);
+
+      expect(result).toEqual({ ok: false, kind: "network" });
+    });
   });
 
   describe("pull", () => {
@@ -224,6 +260,17 @@ describe("api client", () => {
 
     it("returns null instead of throwing on a network error", async () => {
       fetchSpy.mockRejectedValue(new Error("ECONNRESET"));
+
+      const api = createApi({ hubUrl: HUB, machineToken: TOKEN });
+      const result = await api.pull(3, "data.ndjson");
+
+      expect(result).toBeNull();
+    });
+
+    it("returns null (not a throw) when the body read rejects mid-stream", async () => {
+      fetchSpy.mockResolvedValue(
+        fakeResponse({ status: 200, textRejects: true }) as unknown as Response,
+      );
 
       const api = createApi({ hubUrl: HUB, machineToken: TOKEN });
       const result = await api.pull(3, "data.ndjson");

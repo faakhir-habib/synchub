@@ -45,31 +45,44 @@ async function doRequest<T>(
     return { ok: false, kind: "http", status: res.status };
   }
 
-  if (opts?.raw) {
-    return { ok: true, data: (await res.text()) as unknown as T };
-  }
-
-  const text = await res.text();
-  if (!text) {
-    return { ok: true, data: undefined as unknown as T };
-  }
-
-  let json: unknown;
+  // Headers can resolve successfully while the body stream itself fails
+  // mid-read (e.g. ECONNRESET downloading a large manifest/ndjson pull).
+  // That rejection must be caught here too, or it throws out of doRequest.
   try {
-    json = JSON.parse(text);
-  } catch {
-    return { ok: false, kind: "parse" };
-  }
+    if (opts?.raw) {
+      return { ok: true, data: (await res.text()) as unknown as T };
+    }
 
-  if (opts?.schema) {
-    const parsed = opts.schema.safeParse(json);
-    if (!parsed.success) {
+    const text = await res.text();
+    if (!text) {
+      // An empty body only counts as a valid (voidish) result when no
+      // schema was expected. If a schema was provided, an empty body is
+      // a parse failure, not `undefined` masquerading as valid data.
+      if (opts?.schema) {
+        return { ok: false, kind: "parse" };
+      }
+      return { ok: true, data: undefined as unknown as T };
+    }
+
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch {
       return { ok: false, kind: "parse" };
     }
-    return { ok: true, data: parsed.data };
-  }
 
-  return { ok: true, data: json as T };
+    if (opts?.schema) {
+      const parsed = opts.schema.safeParse(json);
+      if (!parsed.success) {
+        return { ok: false, kind: "parse" };
+      }
+      return { ok: true, data: parsed.data };
+    }
+
+    return { ok: true, data: json as T };
+  } catch {
+    return { ok: false, kind: "network" };
+  }
 }
 
 /** REST client for the Hub's agent-facing endpoints (auth via X-Machine-Token). */
