@@ -100,29 +100,42 @@ export async function pushLocal(
 
   const d = res.data;
 
-  switch (d.status) {
-    case "accepted":
-    case "unchanged": {
-      if (d.hash) state.set(projectId, filename, d.hash);
-      if (d.status === "accepted") log(`pushed ${filename}`);
-      return;
-    }
-    case "merged":
-    case "behind": {
-      const merged = await api.pull(projectId, filename);
-      if (merged != null) {
-        await writeFile(join(localPath, filename), merged);
+  try {
+    switch (d.status) {
+      case "accepted":
+      case "unchanged": {
         if (d.hash) state.set(projectId, filename, d.hash);
-        log(`${d.status} ${filename}`);
-        if (d.status === "merged") notify("SyncHub — auto-merged", filename);
+        if (d.status === "accepted") log(`pushed ${filename}`);
+        return;
       }
-      return;
+      case "merged":
+      case "behind": {
+        const merged = await api.pull(projectId, filename);
+        if (merged != null) {
+          await writeFile(join(localPath, filename), merged);
+          if (d.hash) state.set(projectId, filename, d.hash);
+          log(`${d.status} ${filename}`);
+          if (d.status === "merged") notify("SyncHub — auto-merged", filename);
+        }
+        return;
+      }
+      case "conflict": {
+        log(`CONFLICT ${filename} — resolve it in the Hub UI`);
+        notify("SyncHub — conflict", `${filename} needs manual resolution in the Hub`);
+        return;
+      }
+      default: {
+        const _exhaustive: never = d.status;
+        log(`push ${filename}: unknown status ${String(_exhaustive)}`);
+        return;
+      }
     }
-    case "conflict": {
-      log(`CONFLICT ${filename} — resolve it in the Hub UI`);
-      notify("SyncHub — conflict", `${filename} needs manual resolution in the Hub`);
-      return;
-    }
+  } catch (err) {
+    // pushLocal must never throw: it's called directly (unwrapped) as well
+    // as from reconcileProject's try/catch, so any unexpected disk error or
+    // rejection here (e.g. writeFile failing) must be caught locally too.
+    log(`push ${filename}: unexpected error: ${String(err)}`);
+    return;
   }
 }
 
