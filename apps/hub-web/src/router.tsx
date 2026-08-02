@@ -11,7 +11,7 @@ import { ProjectDetail } from "./routes/ProjectDetail.js";
 import { Machines } from "./routes/Machines.js";
 import { Conflicts } from "./routes/Conflicts.js";
 import { Notifications } from "./routes/Notifications.js";
-import { Settings } from "./routes/Placeholders.js";
+import { Settings } from "./routes/Settings.js";
 import { AuthGuard } from "./auth/AuthGuard.js";
 import { Login } from "./auth/Login.js";
 import { Signup } from "./auth/Signup.js";

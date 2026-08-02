@@ -35,6 +35,7 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string, name?: string) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -155,8 +156,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearSession();
   }, [clearSession]);
 
+  // Re-fetches the current user and updates context state — used after a
+  // profile edit (Settings) so consumers like the topbar's user chip pick up
+  // the new name/email without a reload. This is deliberately separate from
+  // the qk.me react-query cache: that cache backs Settings' own form, while
+  // this is the one piece of "current user" state the rest of the app (e.g.
+  // Topbar) actually reads via useAuth().user.
+  //
+  // On a 401 the global unauthorized handler has already fired (see the
+  // effect above) and cleared the session — nothing left to do here. Any
+  // other failure (network blip, 5xx) is swallowed and the stale user is
+  // kept rather than logging out on a transient error.
+  const refreshUser = useCallback(async () => {
+    try {
+      const me = await getMe();
+      setUser(me);
+    } catch {
+      // keep the existing user — see comment above
+    }
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, signup, logout }}>
+    <AuthContext.Provider value={{ user, token, isLoading, login, signup, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );
