@@ -313,4 +313,28 @@ describe("ProjectDetail", () => {
 
     await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/hub-api is unreachable/));
   });
+
+  it("shows a friendly not-found panel when getProject rejects with a 400 (e.g. an id the API rejects as out of range)", async () => {
+    getProjectMock.mockRejectedValue(
+      new ApiError(400, "bad_request", "Validation failed (numeric string is expected)"),
+    );
+
+    // A normal-looking integer id — this exercises the "parses fine
+    // client-side, API still 400s" half of the fix, distinct from the NaN
+    // case below which never calls the API at all.
+    const { ui } = wrap(<ProjectDetail projectId={99999999} />);
+    render(ui);
+
+    await waitFor(() => expect(screen.getByText(/project not found/i)).toBeDefined());
+    expect(getProjectMock).toHaveBeenCalledWith(99999999);
+  });
+
+  it("shows a friendly not-found panel for a non-numeric project id without ever calling the API", async () => {
+    const { ui } = wrap(<ProjectDetail projectId={NaN} />);
+    render(ui);
+
+    expect(screen.getByText(/project not found/i)).toBeDefined();
+    expect(getProjectMock).not.toHaveBeenCalled();
+    expect(getProjectConflictsMock).not.toHaveBeenCalled();
+  });
 });

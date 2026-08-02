@@ -177,6 +177,11 @@ describe("RealtimeGateway", () => {
     const user = connect(`ws://127.0.0.1:${port}/ws/user?token=${token}`);
     await waitForOpen(user.ws);
     await user.nextMessageOfType("welcome");
+    // The machine already existed when the user socket connected, so the
+    // connect-time presence snapshot (see sendPresenceSnapshot) queues one
+    // "offline" frame for it ahead of the "online" one the agent triggers
+    // below — drain it first so the assertions below see the live update.
+    await user.nextMessageOfType("presence");
 
     const agent = connect(`ws://127.0.0.1:${port}/ws/agent?token=${machine.machineToken}`);
     await waitForOpen(agent.ws);
@@ -205,6 +210,9 @@ describe("RealtimeGateway", () => {
     const user = connect(`ws://127.0.0.1:${port}/ws/user?token=${token}`);
     await waitForOpen(user.ws);
     await user.nextMessageOfType("welcome");
+    // Same connect-time snapshot as above: the machine already exists
+    // (offline) when the user socket connects, so drain that frame first.
+    await user.nextMessageOfType("presence"); // initial offline snapshot
 
     const agent = connect(`ws://127.0.0.1:${port}/ws/agent?token=${machine.machineToken}`);
     await waitForOpen(agent.ws);
@@ -222,6 +230,39 @@ describe("RealtimeGateway", () => {
 
     const row = await prisma.machine.findUnique({ where: { id: machine.id } });
     expect(row?.status).toBe("offline");
+
+    user.ws.close();
+  });
+
+  it("sends a presence snapshot for every owned machine when a /ws/user socket connects", async () => {
+    const { token } = await signup();
+    const onlineMachine = await createMachine(token);
+    const offlineMachine = await createMachine(token);
+
+    // Seed DB status directly rather than connecting a real agent — this is
+    // a snapshot-on-connect test, not another exercise of the agent-connect
+    // broadcast path (already covered above).
+    await prisma.machine.update({
+      where: { id: onlineMachine.id },
+      data: { status: "online", last_seen_at: new Date() },
+    });
+
+    const user = connect(`ws://127.0.0.1:${port}/ws/user?token=${token}`);
+    await waitForOpen(user.ws);
+    await user.nextMessageOfType("welcome");
+
+    const first = await user.nextMessageOfType("presence");
+    const second = await user.nextMessageOfType("presence");
+    const byMachineId = new Map([first, second].map((m) => [m.machineId, m]));
+
+    expect(byMachineId.get(onlineMachine.id)).toMatchObject({
+      type: "presence",
+      status: "online",
+    });
+    expect(byMachineId.get(offlineMachine.id)).toMatchObject({
+      type: "presence",
+      status: "offline",
+    });
 
     user.ws.close();
   });

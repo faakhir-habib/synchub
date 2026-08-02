@@ -212,9 +212,46 @@ export class RealtimeGateway implements OnModuleInit, OnModuleDestroy, RealtimeP
     this.add(this.usersByUser, user.id, ws);
     ws.send(JSON.stringify({ type: "welcome", userId: user.id }));
 
+    // Catch-up: broadcastPresence only fires live, to sockets already open
+    // when an agent connects/disconnects — a browser that opens *after*
+    // that has no way to learn current status otherwise, so every machine
+    // would render "offline" until its agent happens to reconnect during
+    // this browser session. Send this one socket a one-shot snapshot of
+    // each owned machine's current DB status right away.
+    void this.sendPresenceSnapshot(ws, user.id);
+
     ws.on("close", () => {
       this.remove(this.usersByUser, user.id, ws);
     });
+  }
+
+  // Per-socket snapshot, not a broadcast — only the newly-connected ws needs
+  // this, every other open socket for this user already has an accurate
+  // picture. try/catch-wrapped like the upgrade guard and fan-out helpers
+  // above: a Prisma error here must degrade to "no snapshot this time," not
+  // an unhandled rejection (this runs fire-and-forget via `void`).
+  private async sendPresenceSnapshot(ws: AliveWebSocket, userId: number): Promise<void> {
+    try {
+      const machines = await this.prisma.machine.findMany({
+        where: { user_id: userId },
+        select: { id: true, status: true, last_seen_at: true },
+      });
+      if (ws.readyState !== ws.OPEN) return;
+      for (const m of machines) {
+        ws.send(
+          JSON.stringify({
+            type: "presence",
+            machineId: m.id,
+            status: m.status === "online" ? "online" : "offline",
+            lastSeenAt: m.last_seen_at ? m.last_seen_at.toISOString() : null,
+          }),
+        );
+      }
+    } catch {
+      // DB blip — the socket just stays open with no snapshot; live
+      // broadcasts (agent connect/disconnect) still keep presence accurate
+      // for it from this point forward.
+    }
   }
 
   private startHeartbeat(): void {

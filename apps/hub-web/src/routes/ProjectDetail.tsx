@@ -122,10 +122,21 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const queryClient = useQueryClient();
   const [addMappingOpen, setAddMappingOpen] = useState(false);
 
-  const project = useQuery({ queryKey: qk.project(projectId), queryFn: () => getProject(projectId) });
+  // A non-numeric route param (typo'd URL, stale bookmark) arrives here as
+  // NaN. There's nothing to look up — skip the request entirely (both
+  // queries are `enabled: false`) and fall straight to the not-found panel
+  // below instead of ever hitting the API.
+  const validId = Number.isInteger(projectId);
+
+  const project = useQuery({
+    queryKey: qk.project(projectId),
+    queryFn: () => getProject(projectId),
+    enabled: validId,
+  });
   const conflicts = useQuery({
     queryKey: ["projectConflicts", projectId],
     queryFn: () => getProjectConflicts(projectId),
+    enabled: validId,
   });
 
   const syncNowMutation = useMutation({
@@ -150,6 +161,15 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     },
   });
 
+  if (!validId) {
+    return (
+      <div className="flex flex-col gap-6">
+        <BackLink />
+        <ProjectNotFound />
+      </div>
+    );
+  }
+
   if (project.isPending) {
     return (
       <div className="flex flex-col gap-6">
@@ -160,7 +180,15 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   }
 
   if (project.isError) {
-    const notFound = project.error instanceof ApiError && project.error.status === 404;
+    // NestJS's ParseIntPipe on this route rejects a non-numeric :id with 400,
+    // not 404 — both mean "there's nothing here," and both should read as a
+    // friendly not-found rather than the scarier generic ErrorPanel. (The
+    // NaN case above already avoids the request entirely; this branch covers
+    // an id that parses as a number but the API still rejects, e.g. an
+    // out-of-range value.)
+    const notFound =
+      project.error instanceof ApiError &&
+      (project.error.status === 404 || project.error.status === 400);
     return (
       <div className="flex flex-col gap-6">
         <BackLink />

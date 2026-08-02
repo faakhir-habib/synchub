@@ -46,9 +46,10 @@ const projectDetailRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: "/projects/$id",
   // Parses the route param and hands it to the (test-friendly, prop-driven)
-  // ProjectDetail component. A non-numeric id becomes NaN here, which the
-  // API request turns into a 404 — already handled by ProjectDetail's
-  // not-found panel, so no extra validation is needed on this side.
+  // ProjectDetail component. A non-numeric id becomes NaN here; ProjectDetail
+  // treats that as not-found without ever calling the API (and separately
+  // treats a 400 from the API — e.g. an out-of-range numeric id — as
+  // not-found too), so no extra validation is needed on this side.
   component: function ProjectDetailRoute() {
     const { id } = projectDetailRoute.useParams();
     return <ProjectDetail projectId={Number(id)} />;
