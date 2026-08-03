@@ -76,6 +76,7 @@ export function Dashboard() {
           className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4"
         >
           <StatCard
+            index={0}
             label="Active projects"
             icon={FolderKanban}
             accent="primary"
@@ -84,6 +85,7 @@ export function Dashboard() {
             hint={m ? `${m.projects.syncing} syncing now` : undefined}
           />
           <StatCard
+            index={1}
             label="Connected machines"
             icon={Server}
             accent="info"
@@ -92,6 +94,7 @@ export function Dashboard() {
             hint={m ? `${m.machines.online} online` : undefined}
           />
           <StatCard
+            index={2}
             label="Open conflicts"
             icon={GitPullRequestArrow}
             accent={m && m.openConflicts > 0 ? "warning" : "success"}
@@ -100,6 +103,7 @@ export function Dashboard() {
             hint={m ? (m.openConflicts > 0 ? "Needs review" : "All clear") : undefined}
           />
           <StatCard
+            index={3}
             label="Sync success rate"
             icon={CheckCircle2}
             accent="success"

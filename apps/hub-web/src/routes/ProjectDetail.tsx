@@ -126,7 +126,7 @@ function ProjectDetailSkeleton() {
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
-          <StatCard key={i} label="" icon={Files} isLoading />
+          <StatCard key={i} index={i} label="" icon={Files} isLoading />
         ))}
       </div>
       <Skeleton className="h-56 w-full rounded-xl" />
@@ -303,15 +303,17 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
       ) : null}
 
       <section aria-label="Project stats" className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Tracked files" icon={Files} accent="primary" value={data.tracked_files} />
+        <StatCard index={0} label="Tracked files" icon={Files} accent="primary" value={data.tracked_files} />
         <StatCard
+          index={1}
           label="Last sync"
           icon={Clock}
           accent="info"
           value={data.last_sync_at ? timeAgo(data.last_sync_at) : "Never"}
         />
-        <StatCard label="Mappings" icon={Server} accent="success" value={data.mappings.length} />
+        <StatCard index={2} label="Mappings" icon={Server} accent="success" value={data.mappings.length} />
         <StatCard
+          index={3}
           label="Open conflicts"
           icon={GitPullRequestArrow}
           accent={openConflicts.length > 0 ? "warning" : "success"}

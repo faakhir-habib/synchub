@@ -114,6 +114,29 @@
 }
 
 @layer utilities {
+  /* Staggered entrance for stat tiles — each card sets its own animation-delay
+     inline (index * 70ms). `backwards` fill keeps the card in its start state
+     during that delay, then hands transform back to CSS so the hover-lift still
+     works after the entrance finishes. */
+  @keyframes stat-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px) scale(0.985);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  .animate-stat-in {
+    animation: stat-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .animate-stat-in {
+      animation: none;
+    }
+  }
+
   /* Theme-aware thin scrollbar (light + dark) — replaces the jarring native
      OS scrollbar on internally-scrolling cards (e.g. the activity feed). */
   .scroll-themed {
