@@ -115,4 +115,23 @@ describe("MergeService#autoMerge", () => {
     expect(lines.filter((l) => l === dupLine)).toHaveLength(1);
     expect(lines).toEqual([shared.trimEnd(), aLine, bLine, dupLine]);
   });
+
+  // --- memory/*.md behavior (Task 5): markdown notes are edited in place, so
+  // divergent edits must conflict (never silently merge), while a pure append
+  // is a clean forward. This is why memory files can safely reuse the exact
+  // same pipeline as transcripts — markdown lines are never valid JSON. ---
+
+  it("divergent in-place markdown edits are a conflict, not a silent merge", () => {
+    const canonical = "# Memory\n- fact one\n- fact two\n";
+    const incoming = "# Memory\n- fact one\n- fact two (edited)\n";
+    expect(svc.autoMerge(canonical, incoming).kind).toBe("conflict");
+  });
+
+  it("appending to a markdown file is a clean forward", () => {
+    const canonical = "# Memory\n- fact one\n";
+    const incoming = "# Memory\n- fact one\n- fact two\n";
+    const m = svc.autoMerge(canonical, incoming);
+    expect(m.kind).toBe("forward");
+    expect(m.merged).toBe(incoming);
+  });
 });
