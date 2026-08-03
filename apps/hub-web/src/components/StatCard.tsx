@@ -46,26 +46,22 @@ export function StatCard({
     <Card
       style={{ "--sc": ACCENT_VAR[accent], animationDelay: `${index * 70}ms` } as CSSProperties}
       className={cn(
-        "group relative isolate animate-stat-in overflow-hidden border-border/60 p-5",
+        "relative isolate animate-stat-in overflow-hidden border-border/60 p-5 shadow-none",
         // faint accent wash from the top-right corner — gives the surface depth
         // instead of flat white/slate.
         "bg-[radial-gradient(125%_125%_at_100%_0%,hsl(var(--sc)_/_0.08),transparent_55%)]",
-        "shadow-[0_1px_2px_hsl(var(--foreground)_/_0.05)]",
-        "transition-[transform,box-shadow,border-color] duration-300 ease-out",
-        "hover:-translate-y-0.5 hover:border-[hsl(var(--sc)_/_0.4)]",
-        "hover:shadow-[0_14px_30px_-14px_hsl(var(--sc)_/_0.5)]",
         className,
       )}
     >
-      {/* top accent rule — a hairline gradient that lifts on hover */}
+      {/* top accent rule — a static hairline gradient */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,hsl(var(--sc)_/_0.7),transparent)] opacity-50 transition-opacity duration-300 group-hover:opacity-100"
+        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,hsl(var(--sc)_/_0.7),transparent)] opacity-50"
       />
-      {/* corner glow — brightens and swells on hover */}
+      {/* corner glow — a soft, static accent halo */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -right-6 -top-8 -z-10 h-24 w-24 rounded-full bg-[hsl(var(--sc)_/_0.32)] blur-2xl transition-all duration-500 group-hover:scale-125 group-hover:bg-[hsl(var(--sc)_/_0.5)]"
+        className="pointer-events-none absolute -right-6 -top-8 -z-10 h-24 w-24 rounded-full bg-[hsl(var(--sc)_/_0.32)] blur-2xl"
       />
 
       <div className="flex items-start justify-between gap-4">
@@ -88,7 +84,7 @@ export function StatCard({
           )}
         </div>
         <span
-          className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[linear-gradient(135deg,hsl(var(--sc)_/_0.2),hsl(var(--sc)_/_0.06))] text-[hsl(var(--sc))] shadow-[0_2px_8px_-2px_hsl(var(--sc)_/_0.45)] ring-1 ring-inset ring-[hsl(var(--sc)_/_0.25)] transition-transform duration-300 group-hover:-rotate-3 group-hover:scale-105"
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[linear-gradient(135deg,hsl(var(--sc)_/_0.2),hsl(var(--sc)_/_0.06))] text-[hsl(var(--sc))] ring-1 ring-inset ring-[hsl(var(--sc)_/_0.25)]"
         >
           <Icon className="h-5 w-5" strokeWidth={2} />
         </span>
