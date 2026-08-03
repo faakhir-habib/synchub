@@ -57,27 +57,46 @@ interface LocalFile {
   hash: string;
 }
 
-/** Read every `*.jsonl` file in `dir`. Returns `{}` if the directory is missing or unreadable. */
-async function localFiles(dir: string): Promise<Record<string, LocalFile>> {
+/** Read every `*<ext>` file directly in `dir`, keyed `${keyPrefix}${name}`. */
+async function collectInto(
+  dir: string,
+  keyPrefix: string,
+  ext: string,
+  out: Record<string, LocalFile>,
+): Promise<void> {
   let entries;
   try {
     entries = await readdir(dir, { withFileTypes: true });
   } catch {
-    return {};
+    // Missing/unreadable directory (e.g. no memory/ subfolder) — skip it.
+    return;
   }
 
-  const out: Record<string, LocalFile> = {};
   for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+    if (!entry.isFile() || !entry.name.endsWith(ext)) continue;
     try {
       const content = await readFile(join(dir, entry.name), "utf8");
-      out[entry.name] = { content, hash: hashContent(content) };
+      out[`${keyPrefix}${entry.name}`] = { content, hash: hashContent(content) };
     } catch {
-      // Unreadable file (permissions, mid-write, ...) — skip it rather
-      // than abort the whole directory scan.
+      // Unreadable file (permissions, mid-write, ...) — skip it.
     }
   }
+}
+
+/** Read this project's synced files: top-level `*.jsonl` and `memory/*.md`. */
+async function localFiles(dir: string): Promise<Record<string, LocalFile>> {
+  const out: Record<string, LocalFile> = {};
+  await collectInto(dir, "", ".jsonl", out);
+  await collectInto(join(dir, "memory"), "memory/", ".md", out);
   return out;
+}
+
+/** Create the parent dir of `filename` under `localPath` when it is nested
+ *  (e.g. `memory/foo.md`). No-op for a plain top-level basename. */
+async function ensureParentDir(localPath: string, filename: string): Promise<void> {
+  const slash = filename.lastIndexOf("/");
+  if (slash === -1) return;
+  await mkdir(join(localPath, filename.slice(0, slash)), { recursive: true });
 }
 
 /**
@@ -119,6 +138,7 @@ export async function pushLocal(
       case "behind": {
         const merged = await api.pull(projectId, filename);
         if (merged != null) {
+          await ensureParentDir(localPath, filename);
           await writeFile(join(localPath, filename), merged);
           if (d.hash) state.set(projectId, filename, d.hash);
           log(`${d.status} ${filename}`);
@@ -232,6 +252,7 @@ export async function reconcileProject(deps: ReconcileDeps, target: ProjectTarge
         // Hub-only (and not tombstoned — handled above).
         const content = await api.pull(projectId, filename);
         if (content != null) {
+          await ensureParentDir(localPath, filename);
           await writeFile(join(localPath, filename), content);
           state.set(projectId, filename, hub.hash);
           log(`pulled ${filename}`);

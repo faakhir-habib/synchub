@@ -408,4 +408,34 @@ describe("reconcile", () => {
       expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe("memory files", () => {
+    it("pulls a Hub-only memory/*.md into the local memory/ dir (creating it)", async () => {
+      const api = makeApi({
+        getManifest: vi.fn(async () => ({
+          ok: true,
+          data: [{ filename: "memory/notes.md", hash: "mh1", size: 3, updated_at: "t" }],
+        })),
+        pull: vi.fn(async () => "mem-body"),
+      });
+
+      await reconcileProject(deps(api), { projectId: 1, localPath: localDir });
+
+      const dest = join(localDir, "memory", "notes.md");
+      expect(existsSync(dest)).toBe(true);
+      expect(readFileSync(dest, "utf8")).toBe("mem-body");
+      expect(state.get(1, "memory/notes.md")).toBe("mh1");
+    });
+
+    it("pushes a local-only memory/*.md keyed memory/<name>", async () => {
+      mkdirSync(join(localDir, "memory"), { recursive: true });
+      writeFileSync(join(localDir, "memory", "notes.md"), "local-mem", "utf8");
+      const push = vi.fn(async () => ({ ok: true, data: { status: "accepted", hash: "mh2" } }));
+      const api = makeApi({ push });
+
+      await reconcileProject(deps(api), { projectId: 1, localPath: localDir });
+
+      expect(push).toHaveBeenCalledWith(1, "memory/notes.md", "local-mem", null);
+    });
+  });
 });
