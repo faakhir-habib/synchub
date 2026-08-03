@@ -26,13 +26,13 @@ the **primary** way to pair during install is environment variables, not
 `install.sh <CODE> <HUB>`-style flags:
 
 ```sh
-SYNCHUB_CODE=ABC123 SYNCHUB_HUB=https://synchub.mylogiclab.cloud \
+SYNCHUB_CODE=ABC123 SYNCHUB_HUB=https://synchub.example.com \
   curl -fsSL https://raw.githubusercontent.com/faakhir-habib/synchub/main/apps/agent/install/install.sh | sh
 ```
 
 ```powershell
 $env:SYNCHUB_CODE = "ABC123"
-$env:SYNCHUB_HUB = "https://synchub.mylogiclab.cloud"
+$env:SYNCHUB_HUB = "https://synchub.example.com"
 irm https://raw.githubusercontent.com/faakhir-habib/synchub/main/apps/agent/install/install.ps1 | iex
 ```
 
