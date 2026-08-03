@@ -362,6 +362,85 @@ describe("watchProjects", () => {
     handle.close();
   });
 
+  it("debounces a memory/*.md change and enqueues a push keyed memory/<name>", async () => {
+    const m = mapping({ project_id: 1, local_path: "C:\\proj1" });
+    const watcher = makeFakeWatcher();
+    const queue = makeQueue();
+    const state = makeState({ get: vi.fn(() => "mem-base") });
+    const api = makeApi();
+
+    const handle = watchProjects(queue as never, api, state, makeTombstones(), [m], {
+      log,
+      notify,
+      debounceMs: 300,
+      watcherFactory: () => watcher,
+    });
+
+    const path = join("C:\\proj1", "memory", "notes.md");
+    watcher.emit("change", path);
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(queue.has("push:1/memory/notes.md")).toBe(true);
+
+    readFileMock.mockResolvedValue("mem-content");
+    await queue.run("push:1/memory/notes.md");
+
+    expect(pushLocalSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ api, state }),
+      1,
+      "C:\\proj1",
+      "memory/notes.md",
+      "mem-content",
+      "mem-base",
+    );
+
+    handle.close();
+  });
+
+  it("ignores files in non-memory subfolders and non-.md files in memory", async () => {
+    const m = mapping({ project_id: 1, local_path: "C:\\proj1" });
+    const watcher = makeFakeWatcher();
+    const queue = makeQueue();
+
+    const handle = watchProjects(queue as never, makeApi(), makeState(), makeTombstones(), [m], {
+      log,
+      notify,
+      debounceMs: 300,
+      watcherFactory: () => watcher,
+    });
+
+    watcher.emit("change", join("C:\\proj1", "some-session", "x.jsonl"));
+    watcher.emit("change", join("C:\\proj1", "memory", "scratch.txt"));
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(queue.enqueue).not.toHaveBeenCalled();
+    handle.close();
+  });
+
+  it("tombstones + enqueues a delete for a memory/*.md unlink", async () => {
+    const m = mapping({ project_id: 1, local_path: "C:\\proj1" });
+    const watcher = makeFakeWatcher();
+    const queue = makeQueue();
+    const tombstones = makeTombstones();
+    const api = makeApi();
+
+    const handle = watchProjects(queue as never, api, makeState(), tombstones, [m], {
+      log,
+      notify,
+      watcherFactory: () => watcher,
+    });
+
+    watcher.emit("unlink", join("C:\\proj1", "memory", "notes.md"));
+
+    expect(tombstones.has("1/memory/notes.md")).toBe(true);
+    expect(queue.has("delete:1/memory/notes.md")).toBe(true);
+
+    await queue.run("delete:1/memory/notes.md");
+    expect(api.deleteFile).toHaveBeenCalledWith(1, "memory/notes.md");
+
+    handle.close();
+  });
+
   it("close() closes every created watcher and clears pending timers (no stale enqueue after close)", async () => {
     const mappings = [mapping({ project_id: 1 }), mapping({ project_id: 2, local_path: "C:\\proj2" })];
     const watchers: ReturnType<typeof makeFakeWatcher>[] = [];

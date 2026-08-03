@@ -21,7 +21,7 @@
 //     events never race a concurrent reconcile/WS-triggered sync for the
 //     same file — the queue serializes and coalesces by key.
 import { readFile } from "node:fs/promises";
-import { basename } from "node:path";
+import { relative } from "node:path";
 
 import chokidar from "chokidar";
 
@@ -60,6 +60,27 @@ export interface WatchHandleResult {
 const DEFAULT_DEBOUNCE_MS = 300;
 
 /**
+ * Map an absolute event path to its Hub sync key, or null if it isn't a file we
+ * sync. Under a mapped folder we sync exactly two shapes:
+ *   - a top-level transcript:  `<name>.jsonl`     → key `<name>.jsonl`
+ *   - a top-level memory note: `memory/<name>.md` → key `memory/<name>.md`
+ * Everything else (other subfolders, non-.md files in memory/, deeper nesting)
+ * is ignored. The key always uses '/' so it matches the Hub's filename format.
+ */
+export function relSyncName(localPath: string, filePath: string): string | null {
+  const rel = relative(localPath, filePath);
+  if (rel === "" || rel.startsWith("..")) return null;
+  const segs = rel.split(/[\\/]/);
+  if (segs.length === 1) {
+    return segs[0].endsWith(".jsonl") ? segs[0] : null;
+  }
+  if (segs.length === 2 && segs[0] === "memory") {
+    return segs[1].endsWith(".md") ? `memory/${segs[1]}` : null;
+  }
+  return null;
+}
+
+/**
  * Watch every AUTO-mode mapping's local_path for `*.jsonl` add/change
  * (debounced push) and unlink (delete) events, enqueueing the resulting
  * work onto `queue` rather than acting directly.
@@ -82,7 +103,9 @@ export function watchProjects(
   for (const m of mappings.filter((x) => x.sync_mode === "auto")) {
     const watcher = watcherFactory(m.local_path, {
       ignoreInitial: true,
-      depth: 0,
+      // depth 1 so top-level *.jsonl transcripts AND memory/*.md notes are both
+      // seen; relSyncName filters every event down to those two shapes.
+      depth: 1,
       // No awaitWriteFinish here — see the module-level comment (audit #7):
       // we rely on the short debounce below instead, so live-appending
       // transcripts sync promptly rather than stalling on chokidar's
@@ -90,8 +113,8 @@ export function watchProjects(
     });
 
     const onChange = (path: string): void => {
-      const filename = basename(path);
-      if (!filename.endsWith(".jsonl")) return;
+      const syncName = relSyncName(m.local_path, path);
+      if (syncName === null) return;
 
       const existing = timers.get(path);
       if (existing) clearTimeout(existing);
@@ -111,21 +134,21 @@ export function watchProjects(
         // guard (audit #5): that guard only blocks re-PULLING a file the
         // user deleted; once the user recreates it locally, the file exists
         // locally again, so there's nothing left to resurrect.
-        tombstones.delete(`${m.project_id}/${filename}`);
+        tombstones.delete(`${m.project_id}/${syncName}`);
 
-        queue.enqueue(`push:${m.project_id}/${filename}`, async () => {
+        queue.enqueue(`push:${m.project_id}/${syncName}`, async () => {
           // Read at job-run time (not debounce time) so the freshest
           // content is pushed. Guard: the file may have been deleted
           // between the debounce firing and the job actually running.
           const content = await readFile(path, "utf8").catch(() => null);
           if (content === null) return;
 
-          const baseHash = state.get(m.project_id, filename);
+          const baseHash = state.get(m.project_id, syncName);
           await pushLocal(
             { api, state, tombstones, log, notify, onUnauthorized },
             m.project_id,
             m.local_path,
-            filename,
+            syncName,
             content,
             baseHash,
           );
@@ -136,8 +159,8 @@ export function watchProjects(
     };
 
     const onUnlink = (path: string): void => {
-      const filename = basename(path);
-      if (!filename.endsWith(".jsonl")) return;
+      const syncName = relSyncName(m.local_path, path);
+      if (syncName === null) return;
 
       // Tombstone EAGERLY — synchronously, at the moment the unlink is
       // observed, not only once the enqueued delete job succeeds. This
@@ -145,20 +168,20 @@ export function watchProjects(
       // (e.g. the agent is stopped before the queue drains it): reconcile
       // will see the persisted tombstone on a later pass and re-attempt
       // the Hub delete itself (audit #5).
-      tombstones.add(`${m.project_id}/${filename}`);
+      tombstones.add(`${m.project_id}/${syncName}`);
 
-      queue.enqueue(`delete:${m.project_id}/${filename}`, async () => {
-        const res = await api.deleteFile(m.project_id, filename);
+      queue.enqueue(`delete:${m.project_id}/${syncName}`, async () => {
+        const res = await api.deleteFile(m.project_id, syncName);
         if (res.ok) {
-          state.del(m.project_id, filename);
-          log(`deleted ${filename}`);
+          state.del(m.project_id, syncName);
+          log(`deleted ${syncName}`);
         } else if (res.kind === "unauthorized") {
           onUnauthorized?.();
         } else {
           // Leave state as-is (reconcile re-derives it) — the tombstone
           // added above stays put; it's the durable intent, and reconcile
           // will keep re-attempting the Hub delete on later passes.
-          log(`delete ${filename} failed: ${res.kind}`);
+          log(`delete ${syncName} failed: ${res.kind}`);
         }
       });
     };
