@@ -2,6 +2,7 @@
   "name": "@synchub/hub-api",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "build": "prisma generate && nest build",
     "dev": "nest start --watch",

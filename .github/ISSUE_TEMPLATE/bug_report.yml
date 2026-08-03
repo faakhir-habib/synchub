@@ -1,0 +1,46 @@
+name: Bug report
+description: Something isn't working as expected
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of SyncHub is affected?
+      options:
+        - Hub API (apps/hub-api)
+        - Web UI (apps/hub-web)
+        - Agent (apps/agent)
+        - Install scripts / OS service
+        - Sync protocol / shared contract
+        - Docs
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: |
+        1. Mapped project X to machine Y with sync mode auto
+        2. Edited a transcript on machine Y
+        3. Expected it to appear on machine Z, but ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, how the Hub is deployed (Docker/dev), agent version (`synchub-agent --version`), browser if UI-related.
+      placeholder: |
+        Hub: Docker on Ubuntu 24.04, behind Cloudflare Tunnel
+        Agent: v0.1.2 on Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Hub logs, agent output, or browser console errors. Redact tokens and personal data.
+      render: shell

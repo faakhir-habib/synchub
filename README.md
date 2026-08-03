@@ -1,5 +1,9 @@
 # SyncHub
 
+[![CI](https://github.com/faakhir-habib/synchub/actions/workflows/ci.yml/badge.svg)](https://github.com/faakhir-habib/synchub/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/faakhir-habib/synchub)](https://github.com/faakhir-habib/synchub/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Self-hosted **Hub** + headless **Agents** that keep [Claude Code](https://claude.com/claude-code)
 session transcripts (`~/.claude/projects/<hash>/*.jsonl`) in sync across
 any number of machines — independent of Claude account, project path, or OS.
@@ -60,7 +64,7 @@ Data (SQLite DB + relay store) persists in the `synchub-data` volume. See
 
 The agent is a single self-contained binary — no Node.js required. On each
 machine, the whole flow is **install → pair → pick a folder**. `<HUB_URL>` is
-your Hub, e.g. `https://synchub.mylogiclab.cloud`.
+your Hub, e.g. `https://synchub.example.com`.
 
 ### 1. Install
 
@@ -146,5 +150,19 @@ live), and the TypeScript agent (single-binary distribution, install scripts,
 OS service integration) are implemented and tested. The legacy `hub/` and
 `agent/` directories have been deleted.
 
+SyncHub is pre-1.0 and designed for self-hosting by a single user or a small
+trusted group — see the hardening notes in [SECURITY.md](SECURITY.md) before
+exposing a Hub to the public internet.
+
 See `docs/superpowers/specs/` for the design and `docs/superpowers/plans/` for the
 per-phase implementation plans.
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev
+setup, test commands, and PR process. Please report security issues privately
+per [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE) © Faakhir Habib

@@ -2,6 +2,17 @@
   "name": "synchub",
   "version": "0.1.0",
   "private": true,
+  "description": "Self-hosted Hub + headless Agents that keep Claude Code session transcripts in sync across machines",
+  "license": "MIT",
+  "author": "Faakhir Habib",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/faakhir-habib/synchub.git"
+  },
+  "homepage": "https://github.com/faakhir-habib/synchub#readme",
+  "bugs": {
+    "url": "https://github.com/faakhir-habib/synchub/issues"
+  },
   "packageManager": "pnpm@9.15.0",
   "engines": {
     "node": ">=22"
