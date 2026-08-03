@@ -24,9 +24,23 @@ import type { RealtimePort } from "../realtime/realtime.port.js";
 // could be a path-traversal attempt or otherwise unexpected shape. Exported
 // so Task 5's push route can reuse the exact same validation.
 const SAFE_NAME = /^[A-Za-z0-9._-]+$/;
+const MEMORY_PREFIX = "memory/";
 
+// A plain, non-traversing basename. Mirrors the agent's isSafeBasename.
+function isSafeBasename(base: string): boolean {
+  return base.length > 0 && !base.includes("..") && SAFE_NAME.test(base);
+}
+
+// A filename is either a plain top-level basename (a Claude session transcript,
+// e.g. UUID.jsonl) or a single-level memory note (memory/<basename>.md). The
+// plain branch is unchanged from before; the memory branch is the new shape.
 export function isSafeFilename(name: unknown): name is string {
-  return typeof name === "string" && name.length > 0 && name.length <= 255 && SAFE_NAME.test(name);
+  if (typeof name !== "string" || name.length === 0 || name.length > 255) return false;
+  if (name.startsWith(MEMORY_PREFIX)) {
+    const base = name.slice(MEMORY_PREFIX.length);
+    return base.endsWith(".md") && isSafeBasename(base);
+  }
+  return SAFE_NAME.test(name);
 }
 
 export interface MachineMapping {
