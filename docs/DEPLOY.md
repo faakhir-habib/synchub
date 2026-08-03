@@ -31,11 +31,11 @@ restart.
 pnpm --filter @synchub/agent test
 ```
 
-## Coolify (mylogiclab.cloud)
+## Coolify (or any Dockerfile-based PaaS)
 
 1. **New Resource → Application → Docker / Dockerfile** (or "Docker Compose"
    and point at the repo's `docker-compose.yml`).
-2. **Source:** the `faakhir-habib/synchub` repo. **Build context:** the repo
+2. **Source:** this repo (or your fork). **Build context:** the repo
    root (`.`). **Dockerfile:** `apps/hub-api/Dockerfile`.
 3. **Port:** `8080` (Coolify maps it behind the Cloudflare tunnel → HTTPS/wss).
 4. **Persistent storage:** mount a volume at **`/data`** (holds the SQLite DB +
