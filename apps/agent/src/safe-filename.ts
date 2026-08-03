@@ -1,22 +1,32 @@
-// Guards against a Hub-supplied filename (from a `deleted` WS frame, or a
-// manifest entry pulled during reconcile) being used to escape the local
-// sync directory before a join(localPath, filename) fs call. Mirrors
-// hub-api's `isSafeFilename` (apps/hub-api/src/sync/sync.service.ts) — same
-// charset allowlist + length bound — with an explicit `..` rejection added:
-// a name made up entirely of dots (e.g. "..") satisfies hub-api's
-// `/^[A-Za-z0-9._-]+$/` charset regex on its own, so without an explicit
-// check it would slip through as a "safe" name despite being a directory
-// traversal token when joined onto a path.
+// Guards a filename before it is joined onto a local sync directory. Two shapes
+// are safe: a plain top-level basename (e.g. `chat.jsonl`) or a single-level
+// memory note (`memory/<basename>.md`). Everything else — deeper nesting,
+// traversal (`..`), separators inside a basename, absolute paths — is rejected.
+// Mirrors hub-api's `isSafeFilename` (apps/hub-api/src/sync/sync.service.ts).
 import { isAbsolute } from "node:path";
 
 const SAFE_NAME = /^[A-Za-z0-9._-]+$/;
+const MEMORY_PREFIX = "memory/";
 
-/** True iff `name` is a plain, non-traversing basename safe to join onto a local directory. */
+/** A plain, non-traversing basename: charset-clean, no `..`, no NUL, non-empty. */
+function isSafeBasename(base: string): boolean {
+  if (base.length === 0) return false;
+  if (base.includes("..")) return false;
+  if (base.includes("\0")) return false;
+  return SAFE_NAME.test(base);
+}
+
+/** True iff `name` is safe to join onto a local sync directory. */
 export function isSafeFilename(name: string): boolean {
   if (typeof name !== "string" || name.length === 0 || name.length > 255) return false;
-  if (name.includes("/") || name.includes("\\")) return false;
-  if (name.includes("..")) return false;
   if (name.includes("\0")) return false;
   if (isAbsolute(name)) return false;
-  return SAFE_NAME.test(name);
+
+  if (name.startsWith(MEMORY_PREFIX)) {
+    const base = name.slice(MEMORY_PREFIX.length);
+    return base.endsWith(".md") && isSafeBasename(base);
+  }
+
+  if (name.includes("/") || name.includes("\\")) return false;
+  return isSafeBasename(name);
 }

@@ -14,6 +14,12 @@ describe("isSafeFilename", () => {
     ["..", "bare dot-dot"],
     ["...", "triple dot"],
     ["a\0b", "embedded NUL"],
+    ["memory/notes.txt", "memory file not .md"],
+    ["memory/a/b.md", "nested under memory"],
+    ["memory/..md", "dot-dot in memory basename"],
+    ["memory/", "empty memory basename"],
+    ["memory/..", "memory parent traversal"],
+    ["notes/foo.md", "non-memory subfolder"],
   ])("rejects %j (%s)", (name) => {
     expect(isSafeFilename(name)).toBe(false);
   });
@@ -23,6 +29,9 @@ describe("isSafeFilename", () => {
     ["a.jsonl"],
     ["My-File_123.jsonl"],
     ["no-extension"],
+    ["memory/MEMORY.md"],
+    ["memory/notes.md"],
+    ["memory/My-Note_1.md"],
   ])("accepts %j", (name) => {
     expect(isSafeFilename(name)).toBe(true);
   });
