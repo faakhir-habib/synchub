@@ -20,7 +20,7 @@ export interface ServiceDeps {
    */
   isPackagedBinary: boolean;
   runCommand: (cmd: string, args: string[]) => { code: number; stdout: string; stderr: string };
-  writeFile: (path: string, content: string) => void;
+  writeFile: (path: string, content: string, encoding?: "utf8" | "utf16le") => void;
   removeFile: (path: string) => void;
   readFileExists: (path: string) => boolean;
   homedir: string;
@@ -278,56 +278,99 @@ function statusDarwin(deps: ServiceDeps): ServiceStatus {
 
 // --- win32 (Scheduled Task at startup, as SYSTEM) ----------------------------
 
+/** Minimal XML text escape for the values we interpolate into the task XML. */
+function xmlEscape(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Path of the temp task-definition XML (registered, then deleted). */
+function windowsTaskXmlPath(deps: Pick<ServiceDeps, "configPath">): string {
+  return `${deps.configPath}.task.xml`;
+}
+
 /**
- * Build the `/TR` ("Task To Run") value for `schtasks /Create`.
+ * The command Task Scheduler runs at boot.
  *
- * The SEA binary runs at boot as SYSTEM via a Scheduled Task, which has no
- * inherited environment from the paired user session — so `configPath()`
- * (which reads `process.env.SYNCHUB_CONFIG`) would fall back to SYSTEM's own
- * profile and never find the user's paired config. Bake the install-time
- * absolute config path into the task itself by wrapping the real command in
- * `cmd /c set "VAR=value" && "<exe>" run`.
- *
- * This whole string is passed as a SINGLE argv element (via execFileSync,
- * i.e. no shell) to `/TR`. That matters for two reasons:
- *   1. schtasks stores everything after `/TR` up to the next recognized
- *      switch as one opaque command string — passing it as one argv element
- *      guarantees schtasks can't misinterpret the `&&`/spaces inside it as
- *      additional /Create switches.
- *   2. At trigger time Task Scheduler resolves the first token of the stored
- *      string as the executable (here: `cmd`, found via PATH) and passes the
- *      rest verbatim as its argument string, so cmd.exe itself parses the
- *      `set "..." && "..." run --service` — exactly the shell semantics we
- *      want.
- *
- * `set "VAR=value"` (quotes wrapping the whole `VAR=value`, not just value)
- * is the standard cmd.exe idiom for setting an env var to a value containing
- * spaces without the quotes ending up IN the value.
- *
- * `run --service`, not plain `run`: the task is registered (and started) at
- * install time, which may run before the user has paired this machine —
- * `--service` makes `run` wait for `synchub-agent pair` instead of exiting,
- * so the boot-time service never needs a restart once pairing happens.
+ * The SEA binary runs at boot as SYSTEM, which has no inherited environment
+ * from the paired user session — so `configPath()` (which reads
+ * `process.env.SYNCHUB_CONFIG`) would fall back to SYSTEM's own profile and
+ * never find the user's paired config. Bake the install-time absolute config
+ * path into the task by wrapping the real command in
+ * `cmd /c set "VAR=value" && "<exe>" run --service`. `set "VAR=value"`
+ * (quotes around the whole `VAR=value`) is the cmd.exe idiom for a value with
+ * spaces. `--service` makes `run` wait for pairing rather than exit if the
+ * machine isn't paired yet at boot.
  */
-function windowsTaskRunCommand(deps: Pick<ServiceDeps, "selfPath" | "configPath">): string {
-  return `cmd /c set "SYNCHUB_CONFIG=${deps.configPath}" && "${deps.selfPath}" run --service`;
+function windowsExecArguments(deps: Pick<ServiceDeps, "selfPath" | "configPath">): string {
+  return `/c set "SYNCHUB_CONFIG=${deps.configPath}" && "${deps.selfPath}" run --service`;
+}
+
+/**
+ * A Task Scheduler XML definition — used instead of `schtasks`' plain /Create
+ * flags because only XML can express **RestartOnFailure** (the whole point of
+ * this change: an agent crash — e.g. the OOM abort that surfaced as
+ * ERROR_PROCESS_ABORTED / 0x8007042B — must restart, not sit dead until the
+ * next reboot). It also lets us clear the default battery guards so a laptop
+ * on battery keeps syncing, and drop the 72h ExecutionTimeLimit.
+ *
+ * Element order inside <Settings> follows the Task Scheduler schema — schtasks
+ * rejects an out-of-order document.
+ */
+function windowsTaskXml(deps: Pick<ServiceDeps, "selfPath" | "configPath">): string {
+  return [
+    // UTF-16: schtasks /Create /XML rejects a UTF-8 document with "unable to
+    // switch the encoding". The file is written as UTF-16LE (+ BOM) to match.
+    '<?xml version="1.0" encoding="UTF-16"?>',
+    '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',
+    "  <RegistrationInfo>",
+    "    <Description>SyncHub Agent</Description>",
+    "  </RegistrationInfo>",
+    "  <Triggers>",
+    "    <BootTrigger>",
+    "      <Enabled>true</Enabled>",
+    "    </BootTrigger>",
+    "  </Triggers>",
+    "  <Principals>",
+    '    <Principal id="Author">',
+    "      <UserId>S-1-5-18</UserId>",
+    "      <RunLevel>HighestAvailable</RunLevel>",
+    "    </Principal>",
+    "  </Principals>",
+    "  <Settings>",
+    "    <RestartOnFailure>",
+    "      <Interval>PT1M</Interval>",
+    "      <Count>3</Count>",
+    "    </RestartOnFailure>",
+    "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
+    "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>",
+    "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>",
+    "    <StartWhenAvailable>true</StartWhenAvailable>",
+    "    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>",
+    "    <Enabled>true</Enabled>",
+    "  </Settings>",
+    '  <Actions Context="Author">',
+    "    <Exec>",
+    "      <Command>cmd</Command>",
+    `      <Arguments>${xmlEscape(windowsExecArguments(deps))}</Arguments>`,
+    "    </Exec>",
+    "  </Actions>",
+    "</Task>",
+    "",
+  ].join("\n");
 }
 
 function installWindows(deps: ServiceDeps): number {
-  const result = deps.runCommand("schtasks", [
-    "/Create",
-    "/TN",
-    WIN_TASK_NAME,
-    "/TR",
-    windowsTaskRunCommand(deps),
-    "/SC",
-    "ONSTART",
-    "/RU",
-    "SYSTEM",
-    "/RL",
-    "HIGHEST",
-    "/F",
-  ]);
+  // schtasks can only set RestartOnFailure via an XML definition, so write one,
+  // register it with /Create /XML, then delete it (it's only needed for the
+  // registration call — the definition now lives in the Task Scheduler store).
+  const xmlPath = windowsTaskXmlPath(deps);
+  deps.writeFile(xmlPath, windowsTaskXml(deps), "utf16le");
+  const result = deps.runCommand("schtasks", ["/Create", "/TN", WIN_TASK_NAME, "/XML", xmlPath, "/F"]);
+  deps.removeFile(xmlPath);
 
   if (result.code !== 0) {
     const detail = result.stderr || result.stdout;
@@ -414,9 +457,13 @@ function realRunCommand(cmd: string, args: string[]): { code: number; stdout: st
   }
 }
 
-function realWriteFile(path: string, content: string): void {
+const UTF16_BOM = String.fromCharCode(0xfeff);
+
+function realWriteFile(path: string, content: string, encoding: "utf8" | "utf16le" = "utf8"): void {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content, "utf8");
+  // UTF-16 files need a BOM for schtasks to detect the encoding; writeFileSync
+  // with "utf16le" does not add one, so prepend it explicitly.
+  writeFileSync(path, encoding === "utf16le" ? UTF16_BOM + content : content, encoding);
 }
 
 function realRemoveFile(path: string): void {

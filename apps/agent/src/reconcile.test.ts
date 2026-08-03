@@ -3,6 +3,22 @@ import { mkdirSync, rmSync, readFileSync, existsSync, writeFileSync } from "node
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+// Track every fs/promises.readFile call (pass-through, behaviour unchanged) so
+// we can assert reconcile does NOT slurp a file's full content unless it must
+// push it — that whole-content read, done for every file at once, was the
+// heap-spike OOM (crash 0x8007042B). Streaming hashes must not trip this.
+const { readFileSpy } = vi.hoisted(() => ({ readFileSpy: vi.fn() }));
+vi.mock("node:fs/promises", async (importActual) => {
+  const actual = await importActual<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    readFile: (path: unknown, ...rest: unknown[]) => {
+      readFileSpy(path);
+      return (actual.readFile as (...a: unknown[]) => unknown)(path, ...rest);
+    },
+  };
+});
+
 import { createState } from "./state.js";
 import { createTombstones, type TombstoneStore } from "./tombstones.js";
 import { hashContent } from "./hasher.js";
@@ -203,6 +219,25 @@ describe("reconcile", () => {
       expect(push).not.toHaveBeenCalled();
       expect(pull).not.toHaveBeenCalled();
       expect(state.get(1, "same.jsonl")).toBe(hash);
+    });
+
+    it("memory: a file whose hash matches the Hub is streamed, not slurped into memory", async () => {
+      mkdirSync(localDir, { recursive: true });
+      const content = "matching-content";
+      const hash = hashContent(content);
+      writeFileSync(join(localDir, "same.jsonl"), content);
+      const manifest: ManifestEntry[] = [
+        { filename: "same.jsonl", hash, size: content.length, updated_at: "x" },
+      ];
+      const api = makeApi({ getManifest: vi.fn(async () => ({ ok: true, data: manifest })) });
+      readFileSpy.mockClear();
+
+      await reconcileProject(deps(api), { projectId: 1, localPath: localDir });
+
+      // Old impl read the whole file (to hash it) via readFile; the fix hashes
+      // by streaming and only reads full content when a push is required —
+      // which this matching file does not need.
+      expect(readFileSpy).not.toHaveBeenCalledWith(join(localDir, "same.jsonl"));
     });
 
     it("both differ: pushes with baseHash = state.get()", async () => {

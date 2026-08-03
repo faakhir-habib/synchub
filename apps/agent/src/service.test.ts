@@ -274,55 +274,68 @@ describe("installService — win32 (Scheduled Task)", () => {
     return makeDeps({ platform: "win32", ...overrides });
   }
 
-  it("creates a Scheduled Task pointing at selfPath run --service, at ONSTART as SYSTEM/HIGHEST, with SYNCHUB_CONFIG baked in", () => {
+  it("registers a self-healing XML task: boots as SYSTEM, RestartOnFailure, keeps running on battery, SYNCHUB_CONFIG baked into the exec", () => {
     const deps = winDeps();
 
     const code = installService(deps);
 
     expect(code).toBe(0);
-    expect(deps.runCommand).toHaveBeenCalledTimes(1);
-    const [cmd, args] = (deps.runCommand as ReturnType<typeof vi.fn>).mock.calls[0] as [string, string[]];
-    expect(cmd).toBe("schtasks");
 
-    // The whole `cmd /c set ... && "<selfPath>" run --service` string must
-    // be ONE argv element (schtasks stores everything after /TR verbatim as
-    // "Task To Run" and hands it to the command processor at trigger time —
-    // splitting it across multiple argv entries would make schtasks treat
-    // the rest as separate /Create switches instead of part of the command).
-    const trIndex = args.indexOf("/TR");
-    expect(trIndex).toBeGreaterThan(-1);
-    const trValue = args[trIndex + 1];
+    // The task is created from an XML definition (the only way to express
+    // RestartOnFailure — schtasks' plain /Create flags cannot). The XML is
+    // written to a temp file, then registered with /Create /XML.
+    expect(deps.writeFile).toHaveBeenCalledTimes(1);
+    const [xmlPath, xml] = (deps.writeFile as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      string,
+    ];
 
-    expect(trValue.startsWith("cmd /c ")).toBe(true);
-    expect(trValue).toContain(`SYNCHUB_CONFIG=${CONFIG_PATH}`);
-    expect(trValue).toContain(`"${SELF_PATH}" run --service`);
-    // The env var must be SET (via `set` + `&&`) BEFORE the binary runs.
-    expect(trValue.indexOf(`SYNCHUB_CONFIG=${CONFIG_PATH}`)).toBeLessThan(
-      trValue.indexOf(`"${SELF_PATH}" run --service`),
+    // Boots at startup, as SYSTEM, elevated.
+    expect(xml).toContain("<BootTrigger>");
+    expect(xml).toContain("<UserId>S-1-5-18</UserId>"); // SYSTEM
+    expect(xml).toContain("<RunLevel>HighestAvailable</RunLevel>");
+
+    // Self-heals: a crash (the OOM abort we saw was 0x8007042B) restarts
+    // instead of leaving the machine offline until the next reboot.
+    expect(xml).toContain("<RestartOnFailure>");
+    expect(xml).toMatch(/<Count>[1-9]\d*<\/Count>/);
+
+    // A laptop on battery must NOT stop the sync agent.
+    expect(xml).toContain("<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>");
+    expect(xml).toContain("<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>");
+
+    // Same baked-in config + exec as before (SYNCHUB_CONFIG set before the
+    // binary runs), XML-escaped.
+    expect(xml).toContain(`SYNCHUB_CONFIG=${CONFIG_PATH}`);
+    expect(xml).toContain(`&amp;&amp; &quot;${SELF_PATH}&quot; run --service`);
+    expect(xml.indexOf(`SYNCHUB_CONFIG=${CONFIG_PATH}`)).toBeLessThan(
+      xml.indexOf(`${SELF_PATH}&quot; run --service`),
     );
 
-    expect(args).toEqual([
+    // schtasks /XML rejects a UTF-8 document ("unable to switch the
+    // encoding"); it must be declared and written as UTF-16.
+    expect(xml).toContain('encoding="UTF-16"');
+    const encoding = (deps.writeFile as ReturnType<typeof vi.fn>).mock.calls[0][2];
+    expect(encoding).toBe("utf16le");
+
+    // Registered from that XML file.
+    expect(deps.runCommand).toHaveBeenCalledWith("schtasks", [
       "/Create",
       "/TN",
       "SyncHubAgent",
-      "/TR",
-      trValue,
-      "/SC",
-      "ONSTART",
-      "/RU",
-      "SYSTEM",
-      "/RL",
-      "HIGHEST",
+      "/XML",
+      xmlPath,
       "/F",
     ]);
   });
 
-  it("does not write a unit/plist file on windows", () => {
+  it("cleans up the temporary XML file after registering (even though it registered ok)", () => {
     const deps = winDeps();
 
     installService(deps);
 
-    expect(deps.writeFile).not.toHaveBeenCalled();
+    const [xmlPath] = (deps.writeFile as ReturnType<typeof vi.fn>).mock.calls[0] as [string, string];
+    expect(deps.removeFile).toHaveBeenCalledWith(xmlPath);
   });
 
   it("on failure, logs an elevation hint and returns non-zero", () => {

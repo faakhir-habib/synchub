@@ -28,7 +28,7 @@ import type { Api } from "./api.js";
 import { isSafeFilename } from "./safe-filename.js";
 import type { AgentState } from "./state.js";
 import type { TombstoneStore } from "./tombstones.js";
-import { hashContent } from "./hasher.js";
+import { hashFile } from "./hasher.js";
 
 /** Keys are `${projectId}/${filename}` for files the agent itself deleted locally. */
 export type Tombstones = TombstoneStore;
@@ -52,17 +52,18 @@ export type ReconcileTrigger =
   | { trigger: "auto" }
   | { trigger: "manual-project"; projectId: number };
 
-interface LocalFile {
-  content: string;
-  hash: string;
-}
-
-/** Read every `*<ext>` file directly in `dir`, keyed `${keyPrefix}${name}`. */
-async function collectInto(
+/** Hash every `*<ext>` file directly in `dir` by STREAMING it, keyed
+ *  `${keyPrefix}${name}`. Only the hex digest is retained — never the file
+ *  content — so scanning a directory of large transcripts costs O(1) memory
+ *  instead of O(sum of all file sizes). Holding every file's content at once
+ *  here is what spiked the heap and OOM-crashed the agent (0x8007042B); the
+ *  content is now re-read lazily, one file at a time, only when a push needs
+ *  it (see reconcileProject). */
+async function collectHashesInto(
   dir: string,
   keyPrefix: string,
   ext: string,
-  out: Record<string, LocalFile>,
+  out: Record<string, string>,
 ): Promise<void> {
   let entries;
   try {
@@ -75,20 +76,27 @@ async function collectInto(
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith(ext)) continue;
     try {
-      const content = await readFile(join(dir, entry.name), "utf8");
-      out[`${keyPrefix}${entry.name}`] = { content, hash: hashContent(content) };
+      out[`${keyPrefix}${entry.name}`] = await hashFile(join(dir, entry.name));
     } catch {
       // Unreadable file (permissions, mid-write, ...) — skip it.
     }
   }
 }
 
-/** Read this project's synced files: top-level `*.jsonl` and `memory/*.md`. */
-async function localFiles(dir: string): Promise<Record<string, LocalFile>> {
-  const out: Record<string, LocalFile> = {};
-  await collectInto(dir, "", ".jsonl", out);
-  await collectInto(join(dir, "memory"), "memory/", ".md", out);
+/** Hashes of this project's synced files: top-level `*.jsonl` and
+ *  `memory/*.md`. Keyed by sync filename; values are content hashes only. */
+async function localHashes(dir: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  await collectHashesInto(dir, "", ".jsonl", out);
+  await collectHashesInto(join(dir, "memory"), "memory/", ".md", out);
   return out;
+}
+
+/** Re-read one local file's content for a push, one file at a time (never the
+ *  whole directory at once). Returns null if it vanished/became unreadable
+ *  between the hash scan and now — the caller then simply skips the push. */
+function readForPush(localPath: string, filename: string): Promise<string | null> {
+  return readFile(join(localPath, filename), "utf8").catch(() => null);
 }
 
 /** Create the parent dir of `filename` under `localPath` when it is nested
@@ -192,7 +200,7 @@ export async function reconcileProject(deps: ReconcileDeps, target: ProjectTarge
   }
 
   const manifest = new Map(man.data.map((f) => [f.filename, f]));
-  const local = await localFiles(localPath);
+  const local = await localHashes(localPath);
   // Fold in this project's currently-tombstoned filenames too: a fully
   // confirmed delete (Hub no longer lists it AND it's gone locally) would
   // otherwise never appear in manifest/local at all, so it would never be
@@ -207,7 +215,8 @@ export async function reconcileProject(deps: ReconcileDeps, target: ProjectTarge
   for (const filename of names) {
     try {
       const hub = manifest.get(filename);
-      const loc = local[filename];
+      const localHash = local[filename];
+      const hasLocal = localHash !== undefined;
       const key = `${projectId}/${filename}`;
 
       // hub-supplied (manifest) filenames are untrusted: reject anything
@@ -248,7 +257,7 @@ export async function reconcileProject(deps: ReconcileDeps, target: ProjectTarge
         continue;
       }
 
-      if (hub && !loc) {
+      if (hub && !hasLocal) {
         // Hub-only (and not tombstoned — handled above).
         const content = await api.pull(projectId, filename);
         if (content != null) {
@@ -257,13 +266,22 @@ export async function reconcileProject(deps: ReconcileDeps, target: ProjectTarge
           state.set(projectId, filename, hub.hash);
           log(`pulled ${filename}`);
         }
-      } else if (loc && !hub) {
-        await pushLocal(deps, projectId, localPath, filename, loc.content, null);
-      } else if (loc && hub) {
-        if (loc.hash === hub.hash) {
+      } else if (hasLocal && !hub) {
+        // Local-only: read this one file's content now, only because we're
+        // about to push it.
+        const content = await readForPush(localPath, filename);
+        if (content !== null) {
+          await pushLocal(deps, projectId, localPath, filename, content, null);
+        }
+      } else if (hasLocal && hub) {
+        if (localHash === hub.hash) {
           state.set(projectId, filename, hub.hash);
         } else {
-          await pushLocal(deps, projectId, localPath, filename, loc.content, state.get(projectId, filename));
+          // Diverged: read this one file's content now, only to push it.
+          const content = await readForPush(localPath, filename);
+          if (content !== null) {
+            await pushLocal(deps, projectId, localPath, filename, content, state.get(projectId, filename));
+          }
         }
       }
     } catch (err) {
