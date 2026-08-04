@@ -81,6 +81,42 @@ if (Test-Path $InstallPath) {
 }
 
 # --- 2. Delete the installed binary -------------------------------------------
+#
+# Stopping the Scheduled Task (step 1) only stops an instance THAT service
+# started. A synchub-agent.exe launched any other way - manually, via `run`
+# in a terminal, or a stray leftover from before the service was registered
+# - is still holding the file open, and Windows refuses to delete (or even
+# overwrite) an in-use .exe. Kill any such process first so the delete below
+# actually succeeds instead of failing with "Access to the path ... is denied".
+$runningProcs = Get-Process -Name "synchub-agent" -ErrorAction SilentlyContinue
+if ($runningProcs) {
+  Write-Log "found $($runningProcs.Count) running synchub-agent process(es) not tied to the service - stopping them ..."
+  # Stop-Process first; taskkill as a fallback (a synchub-agent left running
+  # as SYSTEM - e.g. orphaned by a task that was deleted while it was still
+  # running, on an agent build older than this fix - needs a privileged
+  # terminate that Stop-Process doesn't always manage even when this
+  # PowerShell itself is elevated).
+  $runningProcs | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 500
+  $stillRunning = Get-Process -Name "synchub-agent" -ErrorAction SilentlyContinue
+  if ($stillRunning) {
+    foreach ($p in $stillRunning) {
+      & taskkill /F /PID $p.Id 2>$null | Out-Null
+    }
+    Start-Sleep -Milliseconds 500
+    $stillRunning = Get-Process -Name "synchub-agent" -ErrorAction SilentlyContinue
+  }
+  if ($stillRunning) {
+    Write-ErrLog "could not stop $($stillRunning.Count) synchub-agent process(es) (PID(s): $($stillRunning.Id -join ', '))."
+    if (-not $isAdmin) {
+      Write-ErrLog "not running elevated - rerun this script from an elevated (Administrator) PowerShell to stop it."
+    } else {
+      Write-ErrLog "still couldn't stop it even elevated - stop it manually: taskkill /F /PID $($stillRunning.Id -join ' /PID ')"
+    }
+  } else {
+    Write-Log "stopped."
+  }
+}
 
 if (Test-Path $InstallDir) {
   try {
@@ -88,6 +124,8 @@ if (Test-Path $InstallDir) {
     Write-Log "removed $InstallDir"
   } catch {
     Write-ErrLog "failed to remove $InstallDir : $($_.Exception.Message)"
+    Write-ErrLog "a synchub-agent.exe process may still be running and holding the file open - check with:"
+    Write-ErrLog "  Get-Process synchub-agent"
   }
 } else {
   Write-Log "$InstallDir does not exist - nothing to remove."

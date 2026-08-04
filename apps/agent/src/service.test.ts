@@ -454,6 +454,32 @@ describe("installService — win32 (Scheduled Task)", () => {
       ]);
     });
 
+    it("ends any running instance BEFORE deleting the task, so it doesn't orphan a still-running process", () => {
+      const deps = winDeps();
+
+      const code = uninstallService(deps);
+
+      expect(code).toBe(0);
+      const calls = (deps.runCommand as ReturnType<typeof vi.fn>).mock.calls;
+      const endIdx = calls.findIndex((c) => c[0] === "schtasks" && c[1][0] === "/End");
+      const deleteIdx = calls.findIndex((c) => c[0] === "schtasks" && c[1][0] === "/Delete");
+      expect(endIdx).toBeGreaterThanOrEqual(0);
+      expect(deleteIdx).toBeGreaterThan(endIdx);
+    });
+
+    it("ignores an /End failure (nothing was running) and still deletes the task", () => {
+      const deps = winDeps({
+        runCommand: vi.fn((cmd, args) => {
+          if (args[0] === "/End") return { code: 1, stdout: "", stderr: "ERROR: not running" };
+          return { code: 0, stdout: "TaskName: SyncHubAgent\n", stderr: "" };
+        }),
+      });
+
+      const code = uninstallService(deps);
+
+      expect(code).toBe(0);
+    });
+
     it("is idempotent: no-ops cleanly when /Query reports the task doesn't exist", () => {
       const deps = winDeps({
         runCommand: vi.fn(() => ({ code: 1, stdout: "", stderr: "ERROR: not found" })),

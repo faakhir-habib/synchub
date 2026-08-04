@@ -73,8 +73,14 @@ else
 fi
 
 # --- 3. Delete the installed binary ---------------------------------------------
-
+#
+# Stopping the service (step 2) only stops an instance the service started.
+# A synchub-agent launched any other way (manually, via `run` in a terminal)
+# is unaffected by that and would otherwise keep running the old binary
+# after "uninstall" - unlink it below regardless, but still stop the stray
+# process for a clean state (Unix lets you rm a running binary either way).
 if [ -n "$INSTALL_PATH" ]; then
+  pkill -f "$INSTALL_PATH" 2>/dev/null || true
   if rm -f "$INSTALL_PATH" 2>/dev/null; then
     log "removed $INSTALL_PATH"
   else

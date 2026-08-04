@@ -434,6 +434,15 @@ function uninstallWindows(deps: ServiceDeps): number {
     return 0;
   }
 
+  // Stop any currently-running instance BEFORE deleting the task definition.
+  // /Delete alone only removes the registration — a running instance keeps
+  // executing, and once the task is gone Task Scheduler no longer tracks it
+  // at all: the process is now orphaned (still running as SYSTEM, still
+  // holding synchub-agent.exe open) with no `schtasks` handle left to stop
+  // it by. Best-effort: /End fails harmlessly (e.g. "not running") when
+  // there's nothing to stop.
+  deps.runCommand("schtasks", ["/End", "/TN", WIN_TASK_NAME]);
+
   const result = deps.runCommand("schtasks", ["/Delete", "/TN", WIN_TASK_NAME, "/F"]);
 
   if (result.code !== 0) {
