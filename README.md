@@ -126,14 +126,29 @@ That's it — repeat **install → pair → map** on each machine.
 - **Check state:** `synchub-agent status` (on Windows, from an **Administrator**
   shell — a normal shell can't see the `SYSTEM` service and will report it as
   not installed).
-- **Uninstall (completely, one command):**
-  Windows (Administrator PowerShell): `irm https://raw.githubusercontent.com/faakhir-habib/synchub/main/apps/agent/install/uninstall.ps1 | iex`
-  macOS/Linux: `curl -fsSL https://raw.githubusercontent.com/faakhir-habib/synchub/main/apps/agent/install/uninstall.sh | sh`
-  Removes the service, the binary, the PATH entry, and `~/.synchub/` in one
-  shot (pass `-KeepData` / `--keep-data` to keep your pairing for a
-  reinstall). See `apps/agent/install/README.md`.
 - **Notifications:** the single binary has no bundled toast backend — desktop
   notifications are optional and no-op if unavailable; sync works without them.
+
+### Uninstall — one command, completely removes it
+
+Removes the background service, the binary, the PATH entry, and
+`~/.synchub/` (pairing + sync state) in one shot.
+
+**Windows** — run in an **Administrator** PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/faakhir-habib/synchub/main/apps/agent/install/uninstall.ps1 | iex
+```
+
+**macOS / Linux:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/faakhir-habib/synchub/main/apps/agent/install/uninstall.sh | sh
+```
+
+Reinstalling right after and want to keep the existing pairing instead of
+wiping it? Pass `-KeepData` (`install.ps1`) or `--keep-data` (`install.sh`).
+See `apps/agent/install/README.md` for details.
 
 See `apps/agent/install/README.md` for options like `SYNCHUB_VERSION` (pin a
 release), `apps/agent/service/` for the raw OS service templates, and
