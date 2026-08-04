@@ -138,13 +138,19 @@ describe("reconcile", () => {
       expect(state.get(1, "a.jsonl")).toBeNull();
     });
 
-    it("conflict: logs + notifies to resolve in Hub, no state change", async () => {
+    it("conflict: parks base=candidate hash, logs + notifies to resolve in Hub", async () => {
+      const content = "local-content";
       const api = makeApi({
         push: vi.fn(async () => ({ ok: true, data: { status: "conflict", conflictId: 42 } })),
       });
-      await pushLocal(deps(api), 1, localDir, "a.jsonl", "local-content", "base-hash");
+      await pushLocal(deps(api), 1, localDir, "a.jsonl", content, "base-hash");
 
-      expect(state.get(1, "a.jsonl")).toBeNull();
+      // Base advances to OUR candidate hash (not left at the stale "base-hash"):
+      // the Hub parked this content as the conflict candidate, so recording it
+      // as base means the NEXT reconcile sees local as "unchanged since last
+      // sync" and pulls whatever canonical the user resolves to — instead of
+      // re-pushing this same content and reopening the conflict again and again.
+      expect(state.get(1, "a.jsonl")).toBe(hashContent(content));
       expect(log).toHaveBeenCalledWith(expect.stringMatching(/conflict/i));
       expect(notify).toHaveBeenCalledWith(expect.stringMatching(/conflict/i), expect.stringMatching(/manual resolution/i));
     });
@@ -254,6 +260,31 @@ describe("reconcile", () => {
       await reconcileProject(deps(api), { projectId: 1, localPath: localDir });
 
       expect(push).toHaveBeenCalledWith(1, "diff.jsonl", localContent, "previous-base-hash");
+    });
+
+    it("both differ but local unchanged since last sync (base===local): pulls canonical, overwrites local, does not push", async () => {
+      mkdirSync(localDir, { recursive: true });
+      const localContent = "local-equals-base";
+      writeFileSync(join(localDir, "conv.jsonl"), localContent, "utf8");
+      // state === hash of the local file => local hasn't changed since we last
+      // synced it; the divergence is because canonical moved on (another
+      // machine's push, or a conflict resolved to a different version).
+      state.set(1, "conv.jsonl", hashContent(localContent));
+      const manifest: ManifestEntry[] = [
+        { filename: "conv.jsonl", hash: "hub-hash-advanced", size: 5, updated_at: "x" },
+      ];
+      const push = vi.fn(async () => ({ ok: true, data: { status: "accepted", hash: "should-not-happen" } }));
+      const pull = vi.fn(async () => "canonical-advanced-content");
+      const api = makeApi({ getManifest: vi.fn(async () => ({ ok: true, data: manifest })), push, pull });
+
+      await reconcileProject(deps(api), { projectId: 1, localPath: localDir });
+
+      // Canonical wins: pull + overwrite, never re-push a stale-but-unchanged
+      // copy (which for a non-append file would just reopen the conflict).
+      expect(push).not.toHaveBeenCalled();
+      expect(pull).toHaveBeenCalledWith(1, "conv.jsonl");
+      expect(readFileSync(join(localDir, "conv.jsonl"), "utf8")).toBe("canonical-advanced-content");
+      expect(state.get(1, "conv.jsonl")).toBe("hub-hash-advanced");
     });
 
     it("tombstoned hub file: does not pull/write it, and re-attempts the hub delete", async () => {

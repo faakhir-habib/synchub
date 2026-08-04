@@ -28,7 +28,7 @@ import type { Api } from "./api.js";
 import { isSafeFilename } from "./safe-filename.js";
 import type { AgentState } from "./state.js";
 import type { TombstoneStore } from "./tombstones.js";
-import { hashFile } from "./hasher.js";
+import { hashContent, hashFile } from "./hasher.js";
 
 /** Keys are `${projectId}/${filename}` for files the agent itself deleted locally. */
 export type Tombstones = TombstoneStore;
@@ -155,6 +155,18 @@ export async function pushLocal(
         return;
       }
       case "conflict": {
+        // Park OUR candidate as the new local base hash. The Hub stored this
+        // content as the conflict candidate but kept its own canonical, so
+        // recording base=candidate means the next reconcile sees local as
+        // "unchanged since last sync" and adopts whatever canonical the user
+        // resolves to (via reconcileProject's canonical-advanced pull below) —
+        // instead of re-pushing this same content and reopening the conflict
+        // again and again after every resolution. For an append-only *.jsonl
+        // this is moot (autoMerge folds tails), but for a non-mergeable
+        // memory/*.md it's what actually lets a resolved conflict stay
+        // resolved. The candidate content itself is safely parked on the Hub
+        // (candidate blob, shown in the resolver), so nothing is lost.
+        state.set(projectId, filename, hashContent(content));
         log(`CONFLICT ${filename} — resolve it in the Hub UI`);
         notify("SyncHub — conflict", `${filename} needs manual resolution in the Hub`);
         return;
@@ -277,10 +289,32 @@ export async function reconcileProject(deps: ReconcileDeps, target: ProjectTarge
         if (localHash === hub.hash) {
           state.set(projectId, filename, hub.hash);
         } else {
-          // Diverged: read this one file's content now, only to push it.
-          const content = await readForPush(localPath, filename);
-          if (content !== null) {
-            await pushLocal(deps, projectId, localPath, filename, content, state.get(projectId, filename));
+          const baseHash = state.get(projectId, filename);
+          if (baseHash !== null && baseHash === localHash) {
+            // Local is UNCHANGED since we last synced it, yet canonical has
+            // moved on — another machine pushed, or a conflict was resolved to
+            // a different version. Canonical wins: pull + overwrite, rather
+            // than re-pushing a stale-but-unchanged copy. For an append-only
+            // *.jsonl the old push path self-corrected via a "behind" round
+            // trip anyway; for a non-mergeable memory/*.md, re-pushing would
+            // instead reopen the very conflict that was just resolved — this
+            // is the other half (with pushLocal's conflict branch) of making a
+            // resolution actually converge on the losing machine.
+            const content = await api.pull(projectId, filename);
+            if (content != null) {
+              await ensureParentDir(localPath, filename);
+              await writeFile(join(localPath, filename), content);
+              state.set(projectId, filename, hub.hash);
+              log(`pulled ${filename} (canonical advanced)`);
+            }
+          } else {
+            // Genuinely diverged (local edited since last sync): read this one
+            // file's content now, only to push it. The Hub decides
+            // merge/behind/conflict.
+            const content = await readForPush(localPath, filename);
+            if (content !== null) {
+              await pushLocal(deps, projectId, localPath, filename, content, baseHash);
+            }
           }
         }
       }
