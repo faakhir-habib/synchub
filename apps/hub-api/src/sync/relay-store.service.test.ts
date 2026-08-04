@@ -95,9 +95,20 @@ describe("RelayStoreService", () => {
     const drop2 = svc.writeBlob(gcUserId, '{"t":"drop2"}\n');
 
     // graceMs: 0 — this test is exercising the referenced/unreferenced
-    // split, not the mtime grace window (covered separately below), and the
-    // blobs above were just written so they'd otherwise fall inside the
-    // default 5-minute grace and survive regardless of being unreferenced.
+    // split, not the mtime grace window (covered separately below). With
+    // graceMs 0, gcOrphans skips a candidate only if `now - mtime < 0`,
+    // i.e. its mtime reads as being in the future relative to Date.now() —
+    // which should never happen for a blob just written a moment ago, but
+    // flaked intermittently in CI: filesystem mtime resolution can be
+    // coarser than JS's clock and round up past a `Date.now()` read taken
+    // microseconds later, tripping the "possibly in-flight" skip. Backdate
+    // explicitly (same pattern as the "reclaims a stale orphan" test below)
+    // so the 0-grace check never races real time.
+    const past = new Date(Date.now() - 1000);
+    for (const hash of [keep, drop1, drop2]) {
+      utimesSync(join(TEST_DIR, String(gcUserId), "blobs", hash), past, past);
+    }
+
     const deleted = svc.gcOrphans(gcUserId, new Set([keep]), 0);
 
     expect(deleted).toBe(2);
