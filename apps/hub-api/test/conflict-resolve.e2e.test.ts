@@ -464,6 +464,43 @@ describe("POST /api/projects/:id/conflicts/:conflictId/resolve", () => {
       expect(fileState!.hash).toBe(canonicalHash);
     });
 
+    it("markdown (memory/*.md) manual merge with non-JSON prose is accepted, not rejected as invalid JSONL", async () => {
+      const { token, userId, machine, project } = await setup();
+      const filename = "memory/MEMORY.md";
+      const canonicalContent = "# Memory Index\n\n- [one](one.md) — first\n";
+      const candidateContent = "# Memory Index\n\n- [two](two.md) — second\n";
+      const mergedContent = "# Memory Index\n\n- [one](one.md) — first\n- [two](two.md) — second\n";
+
+      const { conflictId } = await seedConflict(
+        userId,
+        project.id,
+        machine.id,
+        filename,
+        canonicalContent,
+        candidateContent,
+      );
+
+      const res = await resolve(token, project.id, conflictId, {
+        choice: "manual",
+        content: mergedContent,
+      });
+
+      // Prose lines aren't JSON — a markdown note must NOT be run through the
+      // JSONL validator (which only applies to *.jsonl transcripts). Before the
+      // fix this returned 400 invalid_jsonl, making markdown conflicts
+      // impossible to hand-merge.
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ status: "resolved", choice: "manual" });
+
+      const fileState = await prisma.fileState.findUnique({
+        where: { project_id_filename: { project_id: project.id, filename } },
+      });
+      expect(relayStore.readBlob(userId, fileState!.hash)).toBe(mergedContent);
+
+      const conflict = await prisma.conflict.findUnique({ where: { id: conflictId } });
+      expect(conflict!.status).toBe("resolved");
+    });
+
     it("returns 400 when choice=manual but content is omitted", async () => {
       const { token, userId, machine, project } = await setup();
       const filename = "session.jsonl";

@@ -153,7 +153,14 @@ export class ConflictsService {
       if (content === undefined) {
         throw new BadRequestException({ error: "content is required for manual resolution" });
       }
-      this.assertValidJsonl(content);
+      // Only *.jsonl transcripts are line-structured JSON. A memory note
+      // (memory/*.md) is prose — running it through the JSONL validator would
+      // reject every hand-merge as "invalid JSON", making markdown conflicts
+      // impossible to resolve via the merge editor. Markdown replaces canonical
+      // wholesale with no structural constraint to enforce.
+      if (filename.endsWith(".jsonl")) {
+        this.assertValidJsonl(content);
+      }
 
       // writeBlob dedupes identical content, so submitting the editor
       // unedited (byte-identical to either side) just reuses that blob's
