@@ -123,12 +123,18 @@ function resolve(
   token: string,
   projectId: number,
   conflictId: number,
-  body?: { choice?: string },
+  body?: { choice?: string; content?: string },
 ) {
   const req = request(app.getHttpServer())
     .post(`/api/projects/${projectId}/conflicts/${conflictId}/resolve`)
     .set("Authorization", `Bearer ${token}`);
   return body === undefined ? req.send() : req.send(body);
+}
+
+function getContent(token: string, projectId: number, conflictId: number) {
+  return request(app.getHttpServer())
+    .get(`/api/projects/${projectId}/conflicts/${conflictId}/content`)
+    .set("Authorization", `Bearer ${token}`);
 }
 
 beforeAll(async () => {
@@ -386,6 +392,247 @@ describe("POST /api/projects/:id/conflicts/:conflictId/resolve", () => {
     const res = await request(app.getHttpServer())
       .post("/api/projects/1/conflicts/1/resolve")
       .send({ choice: "candidate" });
+
+    expect(res.status).toBe(401);
+  });
+
+  describe("choice=manual", () => {
+    it("writes the edited content as a new blob, promotes it to canonical, marks resolved, records event", async () => {
+      const { token, userId, machine, project } = await setup();
+      const filename = "session.jsonl";
+      const canonicalContent = '{"seq":1}\n';
+      const candidateContent = '{"seq":1}\nnot-valid-json\n';
+      const mergedContent = '{"seq":1}\n{"seq":2,"merged":true}\n';
+
+      const { conflictId } = await seedConflict(
+        userId,
+        project.id,
+        machine.id,
+        filename,
+        canonicalContent,
+        candidateContent,
+      );
+
+      const res = await resolve(token, project.id, conflictId, {
+        choice: "manual",
+        content: mergedContent,
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ status: "resolved", choice: "manual" });
+
+      const fileState = await prisma.fileState.findUnique({
+        where: { project_id_filename: { project_id: project.id, filename } },
+      });
+      expect(relayStore.readBlob(userId, fileState!.hash)).toBe(mergedContent);
+      expect(fileState!.size).toBe(Buffer.byteLength(mergedContent, "utf8"));
+      expect(fileState!.last_machine_id).toBe(machine.id);
+
+      const conflict = await prisma.conflict.findUnique({ where: { id: conflictId } });
+      expect(conflict!.status).toBe("resolved");
+
+      const event = await prisma.event.findFirst({
+        where: { project_id: project.id, filename, type: "conflict_resolved" },
+      });
+      expect(event).not.toBeNull();
+      expect(event!.bytes).toBe(Buffer.byteLength(mergedContent, "utf8"));
+    });
+
+    it("submitting content byte-identical to canonical dedupes onto the existing blob (writeBlob's own idempotency)", async () => {
+      const { token, userId, machine, project } = await setup();
+      const filename = "session.jsonl";
+      const canonicalContent = '{"seq":1}\n';
+
+      const { conflictId, canonicalHash } = await seedConflict(
+        userId,
+        project.id,
+        machine.id,
+        filename,
+        canonicalContent,
+        '{"seq":1}\nbad\n',
+      );
+
+      const res = await resolve(token, project.id, conflictId, {
+        choice: "manual",
+        content: canonicalContent,
+      });
+
+      expect(res.status).toBe(200);
+      const fileState = await prisma.fileState.findUnique({
+        where: { project_id_filename: { project_id: project.id, filename } },
+      });
+      expect(fileState!.hash).toBe(canonicalHash);
+    });
+
+    it("returns 400 when choice=manual but content is omitted", async () => {
+      const { token, userId, machine, project } = await setup();
+      const filename = "session.jsonl";
+      const { conflictId } = await seedConflict(
+        userId,
+        project.id,
+        machine.id,
+        filename,
+        '{"seq":1}\n',
+        '{"seq":1}\nbad\n',
+      );
+
+      const res = await resolve(token, project.id, conflictId, { choice: "manual" });
+
+      expect(res.status).toBe(400);
+
+      const conflict = await prisma.conflict.findUnique({ where: { id: conflictId } });
+      expect(conflict!.status).toBe("open");
+    });
+
+    it("returns 400 with the offending line number when content has an invalid JSON line", async () => {
+      const { token, userId, machine, project } = await setup();
+      const filename = "session.jsonl";
+      const { conflictId } = await seedConflict(
+        userId,
+        project.id,
+        machine.id,
+        filename,
+        '{"seq":1}\n',
+        '{"seq":1}\nbad\n',
+      );
+
+      const res = await resolve(token, project.id, conflictId, {
+        choice: "manual",
+        content: '{"seq":1}\n{not valid json}\n',
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty("code", "invalid_jsonl");
+      expect(res.body.error).toContain("line 2");
+
+      const conflict = await prisma.conflict.findUnique({ where: { id: conflictId } });
+      expect(conflict!.status).toBe("open");
+    });
+
+    it("returns 404 resolving an already-resolved conflict with choice=manual", async () => {
+      const { token, userId, machine, project } = await setup();
+      const filename = "session.jsonl";
+      const { conflictId } = await seedConflict(
+        userId,
+        project.id,
+        machine.id,
+        filename,
+        '{"seq":1}\n',
+        '{"seq":1}\nbad\n',
+      );
+
+      const first = await resolve(token, project.id, conflictId, { choice: "canonical" });
+      expect(first.status).toBe(200);
+
+      const second = await resolve(token, project.id, conflictId, {
+        choice: "manual",
+        content: '{"seq":9}\n',
+      });
+      expect(second.status).toBe(404);
+    });
+  });
+});
+
+describe("GET /api/projects/:id/conflicts/:conflictId/content", () => {
+  it("returns both sides' content for an open conflict", async () => {
+    const { token, userId, machine, project } = await setup();
+    const filename = "session.jsonl";
+    const canonicalContent = '{"seq":1}\n';
+    const candidateContent = '{"seq":1}\nnot-valid-json\n';
+
+    const { conflictId } = await seedConflict(
+      userId,
+      project.id,
+      machine.id,
+      filename,
+      canonicalContent,
+      candidateContent,
+    );
+
+    const res = await getContent(token, project.id, conflictId);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ candidate: candidateContent, canonical: canonicalContent });
+  });
+
+  it("returns 404 for a conflict in another user's project", async () => {
+    const owner = await setup();
+    const filename = "session.jsonl";
+    const { conflictId } = await seedConflict(
+      owner.userId,
+      owner.project.id,
+      owner.machine.id,
+      filename,
+      '{"seq":1}\n',
+      '{"seq":1}\nbad\n',
+    );
+
+    const stranger = await signup();
+    const res = await getContent(stranger.token, owner.project.id, conflictId);
+
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 when the conflictId does not belong to the given project", async () => {
+    const { token, userId, machine, project: projectA } = await setup();
+    const projectB = await createProject(token);
+    const filename = "session.jsonl";
+
+    const { conflictId } = await seedConflict(
+      userId,
+      projectA.id,
+      machine.id,
+      filename,
+      '{"seq":1}\n',
+      '{"seq":1}\nbad\n',
+    );
+
+    const res = await getContent(token, projectB.id, conflictId);
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 410 when the candidate blob is missing", async () => {
+    const { token, userId, machine, project } = await setup();
+    const filename = "session.jsonl";
+    const { conflictId, candidateHash } = await seedConflict(
+      userId,
+      project.id,
+      machine.id,
+      filename,
+      '{"seq":1}\n',
+      '{"seq":1}\nbad\n',
+    );
+
+    relayStore.removeBlob(userId, candidateHash);
+
+    const res = await getContent(token, project.id, conflictId);
+    expect(res.status).toBe(410);
+    expect(res.body).toHaveProperty("code", "candidate_missing");
+  });
+
+  it("returns 404 once the conflict has already been resolved", async () => {
+    const { token, userId, machine, project } = await setup();
+    const filename = "session.jsonl";
+    const { conflictId } = await seedConflict(
+      userId,
+      project.id,
+      machine.id,
+      filename,
+      '{"seq":1}\n',
+      '{"seq":1}\nbad\n',
+    );
+
+    const resolveRes = await resolve(token, project.id, conflictId, { choice: "canonical" });
+    expect(resolveRes.status).toBe(200);
+
+    const res = await getContent(token, project.id, conflictId);
+    expect(res.status).toBe(404);
+  });
+
+  it("requires authentication", async () => {
+    const res = await request(app.getHttpServer()).get(
+      "/api/projects/1/conflicts/1/content",
+    );
 
     expect(res.status).toBe(401);
   });

@@ -171,10 +171,24 @@ export const Conflict = z.object({
 });
 export type Conflict = z.infer<typeof Conflict>;
 
-export const ResolveConflictRequest = z.object({
-  choice: z.enum(["candidate", "canonical"]).optional(),
-});
+export const ResolveConflictRequest = z
+  .object({
+    choice: z.enum(["candidate", "canonical", "manual"]).optional(),
+    // Required (and only meaningful) when choice is "manual" — the
+    // hand-edited/merged content to store as the new canonical version.
+    content: z.string().optional(),
+  })
+  .refine((body) => body.choice !== "manual" || body.content !== undefined, {
+    message: "content is required when choice is \"manual\"",
+    path: ["content"],
+  });
 export type ResolveConflictRequest = z.infer<typeof ResolveConflictRequest>;
+
+export const ConflictContentResponse = z.object({
+  candidate: z.string(),
+  canonical: z.string(),
+});
+export type ConflictContentResponse = z.infer<typeof ConflictContentResponse>;
 
 export const ProjectDetail = Project.extend({
   mappings: z.array(

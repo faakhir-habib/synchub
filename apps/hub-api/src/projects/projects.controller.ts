@@ -108,6 +108,15 @@ export class ProjectsController {
     return this.projects.listOpenConflicts(user.id, id);
   }
 
+  @Get(":id/conflicts/:conflictId/content")
+  getConflictContent(
+    @CurrentUser() user: User,
+    @Param("id", ParseIntPipe) id: number,
+    @Param("conflictId", ParseIntPipe) conflictId: number,
+  ) {
+    return this.conflicts.getContent(user.id, id, conflictId);
+  }
+
   @Post(":id/conflicts/:conflictId/resolve")
   @HttpCode(200)
   resolveConflict(
@@ -116,6 +125,6 @@ export class ProjectsController {
     @Param("conflictId", ParseIntPipe) conflictId: number,
     @Body(zodBody(ResolveConflictRequest)) body: ResolveConflictRequest,
   ) {
-    return this.conflicts.resolve(user.id, id, conflictId, body.choice);
+    return this.conflicts.resolve(user.id, id, conflictId, body.choice, body.content);
   }
 }

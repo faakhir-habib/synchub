@@ -21,6 +21,7 @@ import {
   NotificationsSummary,
   Conflict,
   ResolveConflictRequest,
+  ConflictContentResponse,
 } from "@synchub/shared";
 import { get, post, put, del } from "./api.js";
 
@@ -45,7 +46,7 @@ export type SyncNowResponse = z.infer<typeof SyncNowResponse>;
 /** POST /api/projects/:id/conflicts/:conflictId/resolve response. */
 export const ResolveConflictResponse = z.object({
   status: z.literal("resolved"),
-  choice: z.enum(["candidate", "canonical"]),
+  choice: z.enum(["candidate", "canonical", "manual"]),
 });
 export type ResolveConflictResponse = z.infer<typeof ResolveConflictResponse>;
 
@@ -160,6 +161,13 @@ export function resolveConflict(
     `/api/projects/${projectId}/conflicts/${conflictId}/resolve`,
     body,
     ResolveConflictResponse,
+  );
+}
+
+export function getConflictContent(projectId: number, conflictId: number) {
+  return get(
+    `/api/projects/${projectId}/conflicts/${conflictId}/content`,
+    ConflictContentResponse,
   );
 }
 

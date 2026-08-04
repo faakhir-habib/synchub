@@ -6,14 +6,16 @@ import type { ConflictWithProjectAlias } from "@/lib/endpoints";
 import { ApiError } from "../lib/api-error.js";
 import { timeAgo } from "../lib/format.js";
 
-const { getConflictsMock, resolveConflictMock } = vi.hoisted(() => ({
+const { getConflictsMock, resolveConflictMock, getConflictContentMock } = vi.hoisted(() => ({
   getConflictsMock: vi.fn(),
   resolveConflictMock: vi.fn(),
+  getConflictContentMock: vi.fn(),
 }));
 
 vi.mock("@/lib/endpoints", () => ({
   getConflicts: getConflictsMock,
   resolveConflict: resolveConflictMock,
+  getConflictContent: getConflictContentMock,
 }));
 
 // The real <Link> needs a RouterProvider + registered route tree. This is a
@@ -85,6 +87,8 @@ function wrap(ui: ReactNode) {
 beforeEach(() => {
   getConflictsMock.mockReset();
   resolveConflictMock.mockReset();
+  getConflictContentMock.mockReset();
+  getConflictContentMock.mockResolvedValue({ canonical: '{"seq":1}\n', candidate: '{"seq":1}\nbad\n' });
 
   // jsdom doesn't implement scrollIntoView or pointer capture — needed
   // defensively for the Dialog opened by the Resolve button.
