@@ -72,4 +72,54 @@ next steps (`synchub-agent pair <CODE> <HUB_URL>`, then
    background OS service (see `apps/agent/service/`).
 
 Both scripts are idempotent — re-running upgrades the installed binary to
-whatever `SYNCHUB_VERSION` currently resolves to.
+whatever `SYNCHUB_VERSION` currently resolves to. On an elevated/admin
+re-run this is a true in-place upgrade: the background service (Scheduled
+Task / systemd unit / launchd job) is also (re)started against the new
+binary, so an already-running agent picks up the update immediately — no
+uninstall, no reboot. (Without elevation on Windows, or if the service
+was never registered, the binary is still updated; just re-run `synchub-agent
+install` elevated afterward, or restart it yourself, to pick it up.)
+
+## Uninstalling — one-line removal
+
+`uninstall.ps1` / `uninstall.sh` are the install scripts' counterpart: they
+remove everything `install`/`install.ps1`/`install.sh` put in place — the
+background service, the binary, and the PATH entry — in one command.
+
+**Windows** — run in an **Administrator** PowerShell (needed to remove the
+Scheduled Task; without it, the binary/PATH are still cleaned up but the
+service is left registered):
+
+```powershell
+irm https://raw.githubusercontent.com/faakhir-habib/synchub/main/apps/agent/install/uninstall.ps1 | iex
+```
+
+**macOS / Linux** (no sudo needed — the service is a per-user unit):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/faakhir-habib/synchub/main/apps/agent/install/uninstall.sh | sh
+```
+
+You shouldn't need this just to **upgrade** — re-running `install.ps1`/
+`install.sh` already does an in-place upgrade (see above). Reach for
+`uninstall.ps1`/`uninstall.sh` when you actually want SyncHub gone, or
+when switching to a fork/different `SYNCHUB_REPO`.
+
+By default this also deletes `~/.synchub` (config.json/state.json/
+tombstones.json — your pairing + sync state). To keep the existing pairing
+across an uninstall/reinstall, pass `-KeepData` (`install.ps1`) or
+`--keep-data` (`install.sh`):
+
+```powershell
+irm .../uninstall.ps1 | iex  # or, downloaded locally:
+.\uninstall.ps1 -KeepData
+```
+
+```sh
+curl -fsSL .../uninstall.sh | sh -s -- --keep-data
+```
+
+Just want to remove the OS service and leave the binary/PATH/config alone
+(e.g. before an in-place upgrade)? Use the CLI directly instead of the
+script: `synchub-agent uninstall` (add `--purge` to also wipe
+`~/.synchub`).

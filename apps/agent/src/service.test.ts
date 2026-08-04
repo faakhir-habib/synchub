@@ -62,23 +62,42 @@ describe("installService — linux (systemd user unit)", () => {
     expect(content).toContain("Restart=on-failure");
   });
 
-  it("reloads the daemon and enables --now the unit", () => {
+  it("reloads the daemon, enables, and restarts the unit", () => {
     const deps = makeDeps();
 
     installService(deps);
 
     expect(deps.runCommand).toHaveBeenCalledWith("systemctl", ["--user", "daemon-reload"]);
-    expect(deps.runCommand).toHaveBeenCalledWith("systemctl", [
-      "--user",
-      "enable",
-      "--now",
-      "synchub-agent",
-    ]);
+    expect(deps.runCommand).toHaveBeenCalledWith("systemctl", ["--user", "enable", "synchub-agent"]);
+    expect(deps.runCommand).toHaveBeenCalledWith("systemctl", ["--user", "restart", "synchub-agent"]);
+  });
+
+  it("uses restart (not just start/enable --now) so re-running install after the binary was overwritten actually replaces an already-running process", () => {
+    const deps = makeDeps();
+
+    installService(deps);
+
+    const calls = (deps.runCommand as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls).not.toContainEqual(["systemctl", ["--user", "enable", "--now", "synchub-agent"]]);
+    expect(calls).not.toContainEqual(["systemctl", ["--user", "start", "synchub-agent"]]);
   });
 
   it("logs a clear error and returns non-zero when runCommand fails", () => {
     const deps = makeDeps({
       runCommand: vi.fn(() => ({ code: 1, stdout: "", stderr: "boom" })),
+    });
+
+    const code = installService(deps);
+
+    expect(code).not.toBe(0);
+    expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/fail|error/i));
+  });
+
+  it("logs a clear error and returns non-zero when enable succeeds but restart fails", () => {
+    const deps = makeDeps({
+      runCommand: vi.fn((cmd, args) =>
+        args[1] === "restart" ? { code: 1, stdout: "", stderr: "boom" } : { code: 0, stdout: "", stderr: "" },
+      ),
     });
 
     const code = installService(deps);
@@ -187,6 +206,33 @@ describe("installService — darwin (launchd plist)", () => {
       "-w",
       `${HOMEDIR}/Library/LaunchAgents/cloud.mylogiclab.synchub-agent.plist`,
     ]);
+  });
+
+  it("unloads first (best-effort) so re-running install after the binary was overwritten replaces an already-loaded job instead of erroring", () => {
+    const deps = darwinDeps();
+    const plistPath = `${HOMEDIR}/Library/LaunchAgents/cloud.mylogiclab.synchub-agent.plist`;
+
+    const code = installService(deps);
+
+    expect(code).toBe(0);
+    const calls = (deps.runCommand as ReturnType<typeof vi.fn>).mock.calls;
+    const unloadIdx = calls.findIndex((c) => c[0] === "launchctl" && c[1][0] === "unload");
+    const loadIdx = calls.findIndex((c) => c[0] === "launchctl" && c[1][0] === "load");
+    expect(unloadIdx).toBeGreaterThanOrEqual(0);
+    expect(loadIdx).toBeGreaterThan(unloadIdx);
+    expect(deps.runCommand).toHaveBeenCalledWith("launchctl", ["unload", "-w", plistPath]);
+  });
+
+  it("ignores an unload failure (e.g. nothing was loaded yet on a fresh install) and still succeeds", () => {
+    const deps = darwinDeps({
+      runCommand: vi.fn((cmd, args) =>
+        args[0] === "unload" ? { code: 1, stdout: "", stderr: "Could not find specified service" } : { code: 0, stdout: "", stderr: "" },
+      ),
+    });
+
+    const code = installService(deps);
+
+    expect(code).toBe(0);
   });
 
   it("logs a clear error and returns non-zero when runCommand fails", () => {
@@ -347,6 +393,49 @@ describe("installService — win32 (Scheduled Task)", () => {
 
     expect(code).not.toBe(0);
     expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/elevat/i));
+  });
+
+  it("ends any already-running instance and runs a fresh one after registering, so re-running install after the binary was overwritten replaces the running process", () => {
+    const deps = winDeps();
+
+    const code = installService(deps);
+
+    expect(code).toBe(0);
+    const calls = (deps.runCommand as ReturnType<typeof vi.fn>).mock.calls;
+    const createIdx = calls.findIndex((c) => c[0] === "schtasks" && c[1][0] === "/Create");
+    const endIdx = calls.findIndex((c) => c[0] === "schtasks" && c[1][0] === "/End");
+    const runIdx = calls.findIndex((c) => c[0] === "schtasks" && c[1][0] === "/Run");
+    expect(createIdx).toBeGreaterThanOrEqual(0);
+    expect(endIdx).toBeGreaterThan(createIdx);
+    expect(runIdx).toBeGreaterThan(endIdx);
+    expect(deps.runCommand).toHaveBeenCalledWith("schtasks", ["/End", "/TN", "SyncHubAgent"]);
+    expect(deps.runCommand).toHaveBeenCalledWith("schtasks", ["/Run", "/TN", "SyncHubAgent"]);
+  });
+
+  it("ignores an /End failure (nothing was running yet on a fresh install) and still starts it", () => {
+    const deps = winDeps({
+      runCommand: vi.fn((cmd, args) =>
+        args[0] === "/End" ? { code: 1, stdout: "", stderr: "ERROR: not running" } : { code: 0, stdout: "", stderr: "" },
+      ),
+    });
+
+    const code = installService(deps);
+
+    expect(code).toBe(0);
+    expect(deps.runCommand).toHaveBeenCalledWith("schtasks", ["/Run", "/TN", "SyncHubAgent"]);
+  });
+
+  it("still returns success (task is registered; BootTrigger covers it) when the immediate /Run fails, but logs a warning", () => {
+    const deps = winDeps({
+      runCommand: vi.fn((cmd, args) =>
+        args[0] === "/Run" ? { code: 1, stdout: "", stderr: "boom" } : { code: 0, stdout: "", stderr: "" },
+      ),
+    });
+
+    const code = installService(deps);
+
+    expect(code).toBe(0);
+    expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/failed to start it now/i));
   });
 
   describe("uninstallService", () => {

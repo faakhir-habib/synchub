@@ -169,13 +169,24 @@ function installLinux(deps: ServiceDeps): number {
     return reload.code || 1;
   }
 
-  const enable = deps.runCommand("systemctl", ["--user", "enable", "--now", SYSTEMD_UNIT_NAME]);
+  const enable = deps.runCommand("systemctl", ["--user", "enable", SYSTEMD_UNIT_NAME]);
   if (enable.code !== 0) {
     deps.log(`Failed to enable synchub-agent service: ${enable.stderr || enable.stdout}`);
     return enable.code || 1;
   }
 
-  deps.log(`Enabled. Check: systemctl --user status ${SYSTEMD_UNIT_NAME}`);
+  // `restart` (not `enable --now`/`start`) so that re-running `install` after
+  // the binary underneath has been overwritten (e.g. by re-running
+  // install.sh to upgrade) actually replaces the running process — `start`
+  // on an already-active unit is a no-op, which would leave the OLD binary's
+  // code running in memory until something else restarts it.
+  const restart = deps.runCommand("systemctl", ["--user", "restart", SYSTEMD_UNIT_NAME]);
+  if (restart.code !== 0) {
+    deps.log(`Failed to start synchub-agent service: ${restart.stderr || restart.stdout}`);
+    return restart.code || 1;
+  }
+
+  deps.log(`Enabled and running. Check: systemctl --user status ${SYSTEMD_UNIT_NAME}`);
   return 0;
 }
 
@@ -231,13 +242,21 @@ function installDarwin(deps: ServiceDeps): number {
     return 1;
   }
 
+  // launchd has no "restart"/"reload" verb, and `load` on an already-loaded
+  // label errors out instead of restarting it — so unload first (best-effort:
+  // ignore the result, it fails harmlessly when nothing was loaded yet, e.g.
+  // a fresh install). This is what makes re-running `install` after the
+  // plist's underlying binary was overwritten (upgrade via install.sh) pick
+  // up the new binary immediately instead of leaving the old process running.
+  deps.runCommand("launchctl", ["unload", "-w", plistPath]);
+
   const load = deps.runCommand("launchctl", ["load", "-w", plistPath]);
   if (load.code !== 0) {
     deps.log(`Failed to load synchub-agent launchd service: ${load.stderr || load.stdout}`);
     return load.code || 1;
   }
 
-  deps.log(`Loaded. Check: launchctl list | grep ${LAUNCHD_LABEL}`);
+  deps.log(`Loaded and running. Check: launchctl list | grep ${LAUNCHD_LABEL}`);
   return 0;
 }
 
@@ -379,7 +398,24 @@ function installWindows(deps: ServiceDeps): number {
     return result.code || 1;
   }
 
-  deps.log(`Registered. Check: schtasks /Query /TN ${WIN_TASK_NAME}`);
+  // (Re)start it now so re-running `install` after the binary underneath was
+  // overwritten (e.g. re-running install.ps1 to upgrade) actually replaces
+  // the running process — /Create alone only updates the task DEFINITION;
+  // an already-running instance from a previous install keeps executing the
+  // OLD binary's code in memory until something restarts it, otherwise not
+  // until the next reboot. /End stops any such instance (best-effort: fails
+  // harmlessly — e.g. "not running" — on a fresh install where there wasn't
+  // one); /Run then starts a fresh one against the just-registered definition.
+  deps.runCommand("schtasks", ["/End", "/TN", WIN_TASK_NAME]);
+  const runResult = deps.runCommand("schtasks", ["/Run", "/TN", WIN_TASK_NAME]);
+  if (runResult.code !== 0) {
+    const detail = runResult.stderr || runResult.stdout;
+    deps.log(`Registered, but failed to start it now: ${detail}`);
+    deps.log(`It will start automatically at next boot. To retry now: schtasks /Run /TN ${WIN_TASK_NAME}`);
+    return 0;
+  }
+
+  deps.log(`Registered and running. Check: schtasks /Query /TN ${WIN_TASK_NAME}`);
   return 0;
 }
 

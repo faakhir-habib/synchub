@@ -90,6 +90,10 @@ state — that's expected; it starts syncing the moment you pair (step 2).
 > (Not elevated on Windows? The binary still installs; just run
 > `synchub-agent install` from an Administrator PowerShell afterward.)
 
+**To upgrade**, just re-run the same install command — it overwrites the
+binary *and* restarts the already-running service against it, so the update
+takes effect immediately. No need to uninstall first, no reboot.
+
 ### 2. Pair — the only manual step
 
 Get a code from the Hub UI (**Machines → Connect machine**; sign up first on a
@@ -122,9 +126,12 @@ That's it — repeat **install → pair → map** on each machine.
 - **Check state:** `synchub-agent status` (on Windows, from an **Administrator**
   shell — a normal shell can't see the `SYSTEM` service and will report it as
   not installed).
-- **Uninstall:** `synchub-agent uninstall` (Administrator PowerShell on
-  Windows), then delete the binary (`%LOCALAPPDATA%\Programs\SyncHub\` on
-  Windows, `/usr/local/bin/synchub-agent` on macOS/Linux) and `~/.synchub/`.
+- **Uninstall (completely, one command):**
+  Windows (Administrator PowerShell): `irm https://raw.githubusercontent.com/faakhir-habib/synchub/main/apps/agent/install/uninstall.ps1 | iex`
+  macOS/Linux: `curl -fsSL https://raw.githubusercontent.com/faakhir-habib/synchub/main/apps/agent/install/uninstall.sh | sh`
+  Removes the service, the binary, the PATH entry, and `~/.synchub/` in one
+  shot (pass `-KeepData` / `--keep-data` to keep your pairing for a
+  reinstall). See `apps/agent/install/README.md`.
 - **Notifications:** the single binary has no bundled toast backend — desktop
   notifications are optional and no-op if unavailable; sync works without them.
 

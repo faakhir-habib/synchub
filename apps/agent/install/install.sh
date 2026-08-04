@@ -167,6 +167,12 @@ fi
 # On Linux/macOS this uses `systemctl --user` / a launchd user agent — NO
 # root/sudo required. Guarded + non-fatal: the binary is already installed
 # above, so a service hiccup here must not abort the whole script.
+#
+# This is also the upgrade path: `install` restarts (systemd) / reloads
+# (launchd) an already-registered service — see installLinux()/installDarwin()
+# in src/service.ts — so re-running this script to update an already-running
+# agent replaces the running process with the just-downloaded binary. No
+# separate uninstall, no reboot.
 if "$INSTALL_PATH" install; then
   log "service registered and running (it waits for pairing if not paired yet)."
   if [ "$PAIRED" -eq 1 ]; then

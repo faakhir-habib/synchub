@@ -19,6 +19,7 @@ function makeDeps(overrides: Partial<Parameters<typeof cmdPair>[1]> = {}) {
     installService: vi.fn(() => 0),
     uninstallService: vi.fn(() => 0),
     serviceStatus: vi.fn(() => ({ installed: false, running: false, detail: "not installed" })),
+    purgeUserData: vi.fn(() => []),
     log: vi.fn(),
     ...overrides,
   };
@@ -177,7 +178,7 @@ describe("cmdUninstall", () => {
   it("delegates to uninstallService and returns its code", () => {
     const deps = makeDeps({ uninstallService: vi.fn(() => 0) });
 
-    const code = cmdUninstall(deps);
+    const code = cmdUninstall([], deps);
 
     expect(code).toBe(0);
     expect(deps.uninstallService).toHaveBeenCalledTimes(1);
@@ -186,9 +187,37 @@ describe("cmdUninstall", () => {
   it("propagates a non-zero code from uninstallService", () => {
     const deps = makeDeps({ uninstallService: vi.fn(() => 1) });
 
-    const code = cmdUninstall(deps);
+    const code = cmdUninstall([], deps);
 
     expect(code).toBe(1);
+  });
+
+  it("does not purge local data without --purge", () => {
+    const deps = makeDeps({ purgeUserData: vi.fn(() => ["/home/user/.synchub/config.json"]) });
+
+    const code = cmdUninstall([], deps);
+
+    expect(code).toBe(0);
+    expect(deps.purgeUserData).not.toHaveBeenCalled();
+  });
+
+  it("purges local data when --purge is given", () => {
+    const deps = makeDeps({ purgeUserData: vi.fn(() => ["/home/user/.synchub/config.json"]) });
+
+    const code = cmdUninstall(["--purge"], deps);
+
+    expect(code).toBe(0);
+    expect(deps.purgeUserData).toHaveBeenCalledTimes(1);
+    expect(deps.log).toHaveBeenCalledWith(expect.stringContaining("/home/user/.synchub/config.json"));
+  });
+
+  it("does not purge when uninstallService fails, even with --purge", () => {
+    const deps = makeDeps({ uninstallService: vi.fn(() => 1), purgeUserData: vi.fn(() => []) });
+
+    const code = cmdUninstall(["--purge"], deps);
+
+    expect(code).toBe(1);
+    expect(deps.purgeUserData).not.toHaveBeenCalled();
   });
 });
 
@@ -490,6 +519,17 @@ describe("main", () => {
 
     expect(code).toBe(0);
     expect(deps.uninstallService).toHaveBeenCalledTimes(1);
+    expect(deps.purgeUserData).not.toHaveBeenCalled();
+  });
+
+  it("routes 'uninstall --purge' through to purgeUserData", async () => {
+    const deps = makeDeps();
+
+    const code = await main(["node", "cli", "uninstall", "--purge"], deps);
+
+    expect(code).toBe(0);
+    expect(deps.uninstallService).toHaveBeenCalledTimes(1);
+    expect(deps.purgeUserData).toHaveBeenCalledTimes(1);
   });
 
   it("routes 'run --service' to cmdRun in service mode (already-paired: starts immediately, no wait)", async () => {

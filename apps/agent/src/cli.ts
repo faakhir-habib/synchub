@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import os from "node:os";
+import { existsSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { pairRedeem } from "./api.js";
 import { runAgent as runAgentImpl } from "./agent.js";
 import type { AgentConfig } from "./config.js";
 import { loadConfig as loadConfigImpl, saveConfig as saveConfigImpl } from "./config.js";
-import { configPath } from "./paths.js";
+import { configPath, statePath, tombstonePath } from "./paths.js";
 import {
   defaultServiceDeps,
   installService as installServiceImpl,
@@ -24,6 +25,8 @@ export interface CliDeps {
   installService: () => number;
   uninstallService: () => number;
   serviceStatus: () => ServiceStatus;
+  /** Delete local config/state/tombstone files (`~/.synchub/*`). Returns the paths actually removed. */
+  purgeUserData: () => string[];
   log: (msg: string) => void;
 }
 
@@ -35,11 +38,16 @@ const USAGE = [
   "  synchub-agent run                                     Start syncing",
   "  synchub-agent status                                  Show pairing status",
   "  synchub-agent install                                 Register as an OS service (start on boot)",
-  "  synchub-agent uninstall                               Remove the OS service",
+  "  synchub-agent uninstall [--purge]                     Remove the OS service",
+  "                                                         (--purge also deletes ~/.synchub config/state)",
   "  synchub-agent --version                               Print the agent version",
   "",
   "  (internal: the registered OS service runs `run --service`, which waits",
   "   for `pair` instead of exiting if this machine isn't paired yet.)",
+  "",
+  "  To remove SyncHub Agent completely (service + binary + PATH entry),",
+  "  use the uninstall script instead of this command directly — see",
+  "  apps/agent/install/README.md.",
 ].join("\n");
 
 /** Register this machine with the Hub using a pairing code. */
@@ -104,9 +112,38 @@ export function cmdInstall(deps: Pick<CliDeps, "installService">): number {
   return deps.installService();
 }
 
-/** Stop and remove the OS background service registered by `install`. */
-export function cmdUninstall(deps: Pick<CliDeps, "uninstallService">): number {
-  return deps.uninstallService();
+/**
+ * Stop and remove the OS background service registered by `install`. With
+ * `--purge`, also deletes local config/state/tombstone files (~/.synchub) —
+ * without it, an unpaired-but-service-free machine still has its old pairing
+ * on disk, which is normally what you want (e.g. re-running `install` right
+ * after re-registers against the same Hub with no re-pair needed).
+ */
+export function cmdUninstall(
+  args: string[],
+  deps: Pick<CliDeps, "uninstallService" | "purgeUserData" | "log">,
+): number {
+  const code = deps.uninstallService();
+  if (code !== 0) return code;
+
+  if (args.includes("--purge")) {
+    const removed = deps.purgeUserData();
+    deps.log(removed.length > 0 ? `Purged local data: ${removed.join(", ")}` : "No local data to purge.");
+  }
+
+  return 0;
+}
+
+/** Real (non-test) purgeUserData: deletes config.json/state.json/tombstones.json if present. */
+function purgeUserDataImpl(): string[] {
+  const removed: string[] = [];
+  for (const p of [configPath(), statePath(), tombstonePath()]) {
+    if (existsSync(p)) {
+      rmSync(p, { force: true });
+      removed.push(p);
+    }
+  }
+  return removed;
 }
 
 /** Print the agent version (sourced from package.json, never hardcoded). */
@@ -272,6 +309,7 @@ const defaultDeps: CliDeps = {
   installService: () => installServiceImpl(defaultServiceDeps(defaultLog)),
   uninstallService: () => uninstallServiceImpl(defaultServiceDeps(defaultLog)),
   serviceStatus: () => serviceStatusImpl(defaultServiceDeps(defaultLog)),
+  purgeUserData: purgeUserDataImpl,
   log: defaultLog,
 };
 
@@ -288,7 +326,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps): Promise
     case "install":
       return cmdInstall(deps);
     case "uninstall":
-      return cmdUninstall(deps);
+      return cmdUninstall(rest, deps);
     case "--version":
     case "-v":
       return cmdVersion(deps);

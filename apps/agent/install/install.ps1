@@ -174,7 +174,7 @@ if ($Code -and $Hub) {
   }
 }
 
-# --- 5. Auto-register + start the background service when elevated -----------
+# --- 5. Auto-register + (re)start the background service when elevated -----
 #
 # The registered service runs `synchub-agent run --service`, which WAITS for
 # pairing (polling for the config) instead of exiting if this machine isn't
@@ -182,17 +182,22 @@ if ($Code -and $Hub) {
 # once `pair` runs (from any shell, any time), the already-running service
 # picks up the config and starts syncing with no restart/reboot needed. That
 # makes `pair` the ONE manual step left after an elevated install.
+#
+# `install` itself both registers the Scheduled Task AND (re)starts it - see
+# installWindows() in src/service.ts - so this is also the upgrade path: if
+# you're re-running this installer to update an already-installed agent, the
+# binary just got overwritten above, and this call replaces the running
+# process with one running the new binary. No separate uninstall, no reboot.
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
 
 if ($isAdmin) {
   try {
-    Write-Log "elevated PowerShell detected - registering the background service ..."
+    Write-Log "elevated PowerShell detected - registering + (re)starting the background service ..."
     & $InstallPath install
     if ($LASTEXITCODE -ne 0) {
       throw "synchub-agent install exited with code $LASTEXITCODE"
     }
-    Start-ScheduledTask -TaskName SyncHubAgent
-    Write-Log "service installed and running (it waits for pairing if not paired yet)."
+    Write-Log "service installed and running the just-downloaded binary (it waits for pairing if not paired yet)."
     if ($paired) {
       Write-Log "already paired - SyncHub is fully set up, nothing else to do."
     } else {
@@ -210,8 +215,9 @@ if ($isAdmin) {
     }
   }
 } else {
-  Write-Log "not running elevated - binary install is complete, but the background service was NOT registered."
-  Write-Log "To install the background service, re-run this installer from an elevated (Administrator)"
+  Write-Log "not running elevated - binary install is complete, but the background service was NOT registered/updated."
+  Write-Log "If a service from a previous elevated install is already running, it is still running the OLD binary."
+  Write-Log "To install/upgrade the background service, re-run this installer from an elevated (Administrator)"
   Write-Log "PowerShell (or run '$InstallPath install' elevated). Then pair with:"
   Write-Log "  $InstallPath pair <CODE> <HUB_URL>"
   if ($paired) {
