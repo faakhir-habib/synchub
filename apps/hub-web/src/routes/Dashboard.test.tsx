@@ -24,7 +24,7 @@ const METRICS: DashboardMetrics = {
   eventsToday: 42,
   dataTransferredBytes: 5_242_880,
   sessionsSyncedToday: 15,
-  syncSuccessRate: 0.97,
+  syncSuccessRate: 97,
   avgLatencyMs: 128,
   unreadNotifications: 3,
 };
@@ -88,6 +88,7 @@ describe("Dashboard", () => {
     expect(screen.getByText("4")).toBeDefined(); // connected machines
     expect(screen.getByText("3 online")).toBeDefined();
     expect(screen.getByText("97%")).toBeDefined(); // sync success rate
+    expect(screen.getByText("Needs your attention")).toBeDefined(); // unread notifications hint
 
     // secondary "sync engine" metrics
     expect(screen.getByText("42")).toBeDefined(); // events today

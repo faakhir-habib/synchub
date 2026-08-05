@@ -9,6 +9,7 @@ import {
   HardDrive,
   Gauge,
   Files,
+  Bell,
 } from "lucide-react";
 import { getMetrics, getActivity } from "@/lib/endpoints";
 import { qk } from "@/lib/query-keys";
@@ -98,8 +99,17 @@ export function Dashboard() {
             icon={CheckCircle2}
             accent="success"
             isLoading={metricsLoading}
-            value={m ? `${Math.round(m.syncSuccessRate * 100)}%` : undefined}
+            value={m ? `${Math.round(m.syncSuccessRate)}%` : undefined}
             hint="Last 24 hours"
+          />
+          <StatCard
+            index={3}
+            label="Unread notifications"
+            icon={Bell}
+            accent="warning"
+            isLoading={metricsLoading}
+            value={m?.unreadNotifications}
+            hint={m ? (m.unreadNotifications > 0 ? "Needs your attention" : "You're all caught up") : undefined}
           />
         </section>
       )}
