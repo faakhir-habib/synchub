@@ -4,7 +4,6 @@ import type { LucideIcon } from "lucide-react";
 import {
   FolderKanban,
   Server,
-  GitPullRequestArrow,
   CheckCircle2,
   Activity as ActivityIcon,
   HardDrive,
@@ -95,15 +94,6 @@ export function Dashboard() {
           />
           <StatCard
             index={2}
-            label="Open conflicts"
-            icon={GitPullRequestArrow}
-            accent={m && m.openConflicts > 0 ? "warning" : "success"}
-            isLoading={metricsLoading}
-            value={m?.openConflicts}
-            hint={m ? (m.openConflicts > 0 ? "Needs review" : "All clear") : undefined}
-          />
-          <StatCard
-            index={3}
             label="Sync success rate"
             icon={CheckCircle2}
             accent="success"
@@ -118,7 +108,7 @@ export function Dashboard() {
         <Card className="lg:col-span-2">
           <CardHeader className="pb-4">
             <CardTitle className="text-lg">Recent activity</CardTitle>
-            <CardDescription>Pushes, merges, and conflicts across every project.</CardDescription>
+            <CardDescription>Pushes and syncs across every project.</CardDescription>
           </CardHeader>
           <CardContent className="pt-0">
             {activity.isError ? (

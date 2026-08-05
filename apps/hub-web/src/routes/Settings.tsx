@@ -27,7 +27,6 @@ import { cn } from "@/lib/utils";
 interface FormState {
   name: string;
   webhookUrl: string;
-  notifyConflicts: boolean;
   notifySync: boolean;
 }
 
@@ -35,7 +34,6 @@ function toForm(me: MeResponse): FormState {
   return {
     name: me.name ?? "",
     webhookUrl: me.notify_webhook_url ?? "",
-    notifyConflicts: me.notify_conflicts,
     notifySync: me.notify_sync,
   };
 }
@@ -120,7 +118,6 @@ export function Settings() {
   const dirty =
     current.name !== original.name ||
     current.webhookUrl !== original.webhookUrl ||
-    current.notifyConflicts !== original.notifyConflicts ||
     current.notifySync !== original.notifySync;
 
   function update(patch: Partial<FormState>) {
@@ -132,7 +129,6 @@ export function Settings() {
     mutation.mutate({
       name: current.name.trim() === "" ? null : current.name.trim(),
       notify_webhook_url: current.webhookUrl.trim() === "" ? null : current.webhookUrl.trim(),
-      notify_conflicts: current.notifyConflicts,
       notify_sync: current.notifySync,
     });
   }
@@ -200,22 +196,9 @@ export function Settings() {
           <div className="space-y-3 border-t border-border pt-4">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <Label htmlFor="settings-notify-conflicts">Notify on conflicts</Label>
-                <p className="text-xs text-muted-foreground">
-                  Get notified when a sync produces a conflict that needs your decision.
-                </p>
-              </div>
-              <Switch
-                id="settings-notify-conflicts"
-                checked={current.notifyConflicts}
-                onCheckedChange={(checked) => update({ notifyConflicts: checked })}
-              />
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              <div>
                 <Label htmlFor="settings-notify-sync">Notify on syncs</Label>
                 <p className="text-xs text-muted-foreground">
-                  Get notified on ordinary, successful syncs too, not just conflicts.
+                  Get notified when your files sync across machines.
                 </p>
               </div>
               <Switch

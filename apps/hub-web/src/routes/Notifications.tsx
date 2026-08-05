@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCheck, Info, MailCheck, RefreshCw, TriangleAlert } from "lucide-react";
+import { CheckCheck, Info, MailCheck, RefreshCw } from "lucide-react";
 import type { ReactNode } from "react";
 import { getNotifications, markAllNotificationsRead, markNotificationRead } from "@/lib/endpoints";
 import { qk } from "@/lib/query-keys";
@@ -21,11 +21,6 @@ type NotificationItem = {
 };
 
 const TYPE_DISPLAY: Record<string, { label: string; icon: ReactNode; badgeClassName: string }> = {
-  conflict: {
-    label: "conflict",
-    icon: <TriangleAlert className="h-4 w-4" />,
-    badgeClassName: "border-transparent bg-destructive/15 text-destructive",
-  },
   sync: {
     label: "sync",
     icon: <RefreshCw className="h-4 w-4" />,
@@ -69,7 +64,7 @@ function EmptyState() {
       <div className="space-y-1">
         <p className="text-sm font-semibold text-foreground">You&rsquo;re all caught up</p>
         <p className="max-w-[24rem] text-sm text-muted-foreground">
-          Conflict alerts, sync activity, and machine status changes will show up here as they happen.
+          Sync activity and machine status changes will show up here as they happen.
         </p>
       </div>
     </div>
@@ -144,7 +139,7 @@ function NotificationRow({
  * first (the API already orders by `created_at desc`). Live via
  * `qk.notifications`: RealtimeProvider invalidates it on every WS
  * `notification` frame (and toasts the title), so this list needs no polling
- * of its own — the same pattern as Conflicts.
+ * of its own.
  */
 export function Notifications() {
   const notifications = useQuery({ queryKey: qk.notifications, queryFn: getNotifications });
@@ -176,7 +171,7 @@ export function Notifications() {
             Notifications
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Conflict alerts, sync activity, and machine status changes.
+            Sync activity and machine status changes.
           </p>
         </div>
         <Button

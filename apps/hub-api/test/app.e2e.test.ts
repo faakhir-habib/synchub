@@ -87,13 +87,6 @@ describe("AppModule smoke test (every Phase-2a module wired)", () => {
     expect(projects.status).toBe(200);
     expect(Array.isArray(projects.body)).toBe(true);
 
-    // Conflicts module.
-    const conflicts = await request(app.getHttpServer())
-      .get("/api/conflicts")
-      .set("Authorization", `Bearer ${token}`);
-    expect(conflicts.status).toBe(200);
-    expect(Array.isArray(conflicts.body)).toBe(true);
-
     // Notifications module.
     const notifications = await request(app.getHttpServer())
       .get("/api/notifications")
@@ -111,7 +104,6 @@ describe("AppModule smoke test (every Phase-2a module wired)", () => {
     expect(metrics.body).toMatchObject({
       projects: expect.any(Object),
       machines: expect.any(Object),
-      openConflicts: expect.any(Number),
       eventsToday: expect.any(Number),
       dataTransferredBytes: expect.any(Number),
       sessionsSyncedToday: expect.any(Number),

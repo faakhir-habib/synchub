@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { UploadCloud, GitMerge, AlertTriangle, CheckCircle2, RefreshCw, Activity } from "lucide-react";
+import { UploadCloud, RefreshCw, Activity } from "lucide-react";
 import type { ActivityEvent } from "@/lib/endpoints";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fmtBytes, timeAgo } from "@/lib/format";
@@ -13,13 +13,6 @@ interface EventStyle {
 
 const EVENT_STYLES: Record<string, EventStyle> = {
   push: { icon: UploadCloud, label: "File pushed", className: "bg-info/10 text-info" },
-  auto_merge: { icon: GitMerge, label: "Auto-merged", className: "bg-success/10 text-success" },
-  conflict: { icon: AlertTriangle, label: "Conflict detected", className: "bg-destructive/10 text-destructive" },
-  conflict_resolved: {
-    icon: CheckCircle2,
-    label: "Conflict resolved",
-    className: "bg-success/10 text-success",
-  },
   sync_now: { icon: RefreshCw, label: "Manual sync", className: "bg-primary/10 text-primary" },
 };
 
@@ -72,7 +65,7 @@ interface ActivityFeedProps {
   isLoading?: boolean;
 }
 
-/** Recent sync activity — pushes, auto-merges, conflicts, manual syncs. */
+/** Recent sync activity — pushes and manual syncs. */
 export function ActivityFeed({ events, isLoading = false }: ActivityFeedProps) {
   if (isLoading) {
     return (
@@ -92,7 +85,7 @@ export function ActivityFeed({ events, isLoading = false }: ActivityFeedProps) {
         </span>
         <p className="text-sm font-medium text-foreground">No activity yet</p>
         <p className="max-w-[22rem] text-xs text-muted-foreground">
-          Pushes, merges, and conflict resolutions across your projects will show up here.
+          Pushes and syncs across your projects will show up here.
         </p>
       </div>
     );

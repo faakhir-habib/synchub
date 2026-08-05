@@ -2,8 +2,8 @@ import { z } from "zod";
 import { SyncMode, MachineStatus } from "./enums.js";
 
 // NOTE ON BOOLEAN FIELDS: SQLite has no native boolean, so the Prisma models
-// store these as `Int` (0/1): MeResponse.notify_conflicts, MeResponse.notify_sync,
-// Conflict.auto_merged, and NotificationsSummary.items[].read. These DTOs
+// store these as `Int` (0/1): MeResponse.notify_sync and
+// NotificationsSummary.items[].read. These DTOs
 // intentionally expose real booleans — the hub-api layer MUST map Int → boolean
 // (e.g. `!!row.read`) when serializing, or a raw Prisma row will fail
 // `.parse()` here. Do NOT change these to `z.number()`; fix the mapping instead.
@@ -36,7 +36,6 @@ export const MeResponse = z.object({
   email: z.string(),
   name: z.string().nullable(),
   notify_webhook_url: z.string().nullable(),
-  notify_conflicts: z.boolean(),
   notify_sync: z.boolean(),
 });
 export type MeResponse = z.infer<typeof MeResponse>;
@@ -63,7 +62,6 @@ export type LoginResponse = z.infer<typeof LoginResponse>;
 export const ProfileUpdateRequest = z.object({
   name: z.string().nullable().optional(),
   notify_webhook_url: z.string().nullable().optional(),
-  notify_conflicts: z.boolean().optional(),
   notify_sync: z.boolean().optional(),
 });
 export type ProfileUpdateRequest = z.infer<typeof ProfileUpdateRequest>;
@@ -161,35 +159,6 @@ export const Machine = z.object({
 });
 export type Machine = z.infer<typeof Machine>;
 
-export const Conflict = z.object({
-  id: z.number().int(),
-  project_id: z.number().int(),
-  filename: z.string(),
-  status: z.enum(["open", "resolved"]),
-  auto_merged: z.boolean(),
-  created_at: z.string(),
-});
-export type Conflict = z.infer<typeof Conflict>;
-
-export const ResolveConflictRequest = z
-  .object({
-    choice: z.enum(["candidate", "canonical", "manual"]).optional(),
-    // Required (and only meaningful) when choice is "manual" — the
-    // hand-edited/merged content to store as the new canonical version.
-    content: z.string().optional(),
-  })
-  .refine((body) => body.choice !== "manual" || body.content !== undefined, {
-    message: "content is required when choice is \"manual\"",
-    path: ["content"],
-  });
-export type ResolveConflictRequest = z.infer<typeof ResolveConflictRequest>;
-
-export const ConflictContentResponse = z.object({
-  candidate: z.string(),
-  canonical: z.string(),
-});
-export type ConflictContentResponse = z.infer<typeof ConflictContentResponse>;
-
 export const ProjectDetail = Project.extend({
   mappings: z.array(
     z.object({
@@ -213,7 +182,6 @@ export const DashboardMetrics = z.object({
     total: z.number().int(),
     online: z.number().int(),
   }),
-  openConflicts: z.number().int(),
   eventsToday: z.number().int(),
   dataTransferredBytes: z.number().int(),
   sessionsSyncedToday: z.number().int(),

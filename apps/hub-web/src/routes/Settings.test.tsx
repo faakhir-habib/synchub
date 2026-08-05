@@ -68,7 +68,6 @@ const ME: MeResponse = {
   email: "ada@example.com",
   name: "Ada Lovelace",
   notify_webhook_url: "https://example.com/hook",
-  notify_conflicts: true,
   notify_sync: false,
 };
 
@@ -154,9 +153,6 @@ describe("Settings", () => {
     const webhookInput = screen.getByLabelText(/webhook/i) as HTMLInputElement;
     expect(webhookInput.value).toBe("https://example.com/hook");
 
-    const conflictsSwitch = screen.getByRole("switch", { name: /conflicts/i });
-    expect(conflictsSwitch.getAttribute("aria-checked")).toBe("true");
-
     const syncSwitch = screen.getByRole("switch", { name: /sync/i });
     expect(syncSwitch.getAttribute("aria-checked")).toBe("false");
 
@@ -191,7 +187,6 @@ describe("Settings", () => {
     expect(updateMeMock).toHaveBeenCalledWith({
       name: "Grace Hopper",
       notify_webhook_url: "https://example.com/hook",
-      notify_conflicts: true,
       notify_sync: true,
     });
 

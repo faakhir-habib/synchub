@@ -59,7 +59,7 @@ afterAll(async () => {
 });
 
 describe("GET /api/dashboard/metrics", () => {
-  it("computes every tile from seeded data, matching the legacy stats.js formulas", async () => {
+  it("computes every tile from seeded data", async () => {
     const me = await signup();
     const other = await signup();
 
@@ -71,28 +71,14 @@ describe("GET /api/dashboard/metrics", () => {
     await createMachine(me.userId, "laptop", "online");
     await createMachine(me.userId, "desktop", "offline");
 
-    // 1 open conflict (joined through the user's project) + 1 resolved (excluded).
-    await prisma.conflict.create({
-      data: { project_id: projectA.id, filename: "conflicted.txt", candidate_hash: "h1", status: "open" },
-    });
-    await prisma.conflict.create({
-      data: {
-        project_id: projectA.id,
-        filename: "resolved.txt",
-        candidate_hash: "h2",
-        status: "resolved",
-        resolved_at: new Date(),
-      },
-    });
-
-    // Events today: mix of push / auto_merge / conflict, with bytes + latency_ms + filenames.
+    // Events today: all pushes (last-write-wins produces only "push" events),
+    // with bytes + latency_ms + filenames.
     const todaysEvents = [
       { type: "push", filename: "a.txt", project: projectA, bytes: 100, latency_ms: 200 },
       { type: "push", filename: "b.txt", project: projectA, bytes: 200, latency_ms: 300 },
       // Same project/filename pair as the first push -> must not double-count in sessionsSyncedToday.
-      { type: "auto_merge", filename: "a.txt", project: projectA, bytes: 50, latency_ms: null },
-      { type: "auto_merge", filename: "c.txt", project: projectB, bytes: 150, latency_ms: 100 },
-      { type: "conflict", filename: "d.txt", project: projectA, bytes: 0, latency_ms: null },
+      { type: "push", filename: "a.txt", project: projectA, bytes: 50, latency_ms: null },
+      { type: "push", filename: "c.txt", project: projectB, bytes: 150, latency_ms: 100 },
     ];
     for (const e of todaysEvents) {
       await prisma.event.create({
@@ -115,9 +101,6 @@ describe("GET /api/dashboard/metrics", () => {
     // Other user's data — must never leak into `me`'s metrics.
     const otherProject = await createProject(other.userId, `other-${rand()}`, "auto");
     await createMachine(other.userId, "other-machine", "online");
-    await prisma.conflict.create({
-      data: { project_id: otherProject.id, filename: "not-mine.txt", candidate_hash: "h3", status: "open" },
-    });
     await prisma.event.create({
       data: { user_id: other.userId, project_id: otherProject.id, type: "push", filename: "x.txt", bytes: 999, latency_ms: 1 },
     });
@@ -130,36 +113,28 @@ describe("GET /api/dashboard/metrics", () => {
     expect(res.status).toBe(200);
     const body = DashboardMetrics.parse(res.body);
 
-    // Expected values computed from the exact rows seeded above, mirroring
-    // hub/src/models/stats.js#dashboardMetrics field-by-field.
+    // Expected values computed from the exact rows seeded above.
     const eventsToday = todaysEvents.length;
     const dataTransferredBytes = todaysEvents.reduce((sum, e) => sum + e.bytes, 0);
     const sessionsSyncedToday = new Set(
-      todaysEvents
-        .filter((e) => (e.type === "push" || e.type === "auto_merge") && e.filename)
-        .map((e) => `${e.project.id}/${e.filename}`),
+      todaysEvents.filter((e) => e.type === "push" && e.filename).map((e) => `${e.project.id}/${e.filename}`),
     ).size;
-    const ok = todaysEvents.filter((e) => e.type === "push" || e.type === "auto_merge").length;
-    const conflictCount = todaysEvents.filter((e) => e.type === "conflict").length;
-    const denom = ok + conflictCount;
-    const syncSuccessRate = denom > 0 ? Math.round((ok / denom) * 1000) / 10 : 100;
     const latencies = todaysEvents.filter((e) => e.latency_ms != null).map((e) => e.latency_ms as number);
     const avgLatencyMs =
       latencies.length > 0 ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : null;
 
     expect(body.projects).toEqual({ total: 2, syncing: 1 });
     expect(body.machines).toEqual({ total: 2, online: 1 });
-    expect(body.openConflicts).toBe(1);
     expect(body.eventsToday).toBe(eventsToday);
     expect(body.dataTransferredBytes).toBe(dataTransferredBytes);
     expect(body.sessionsSyncedToday).toBe(sessionsSyncedToday);
-    expect(body.syncSuccessRate).toBe(syncSuccessRate);
+    // Last-write-wins: every push succeeds, so the success rate is always 100.
+    expect(body.syncSuccessRate).toBe(100);
     expect(body.avgLatencyMs).toBe(avgLatencyMs);
     expect(body.unreadNotifications).toBe(2);
 
     // Sanity: our seeded numbers actually exercise the interesting cases.
     expect(sessionsSyncedToday).toBe(3);
-    expect(syncSuccessRate).toBe(80);
     expect(avgLatencyMs).toBe(200);
   });
 
@@ -176,7 +151,6 @@ describe("GET /api/dashboard/metrics", () => {
     expect(body.avgLatencyMs).toBeNull();
     expect(body.projects).toEqual({ total: 0, syncing: 0 });
     expect(body.machines).toEqual({ total: 0, online: 0 });
-    expect(body.openConflicts).toBe(0);
     expect(body.eventsToday).toBe(0);
     expect(body.dataTransferredBytes).toBe(0);
     expect(body.sessionsSyncedToday).toBe(0);

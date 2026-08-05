@@ -76,13 +76,11 @@ export class UsersService {
     const data: {
       name?: string | null;
       notify_webhook_url?: string | null;
-      notify_conflicts?: number;
       notify_sync?: number;
     } = {};
 
     if ("name" in body) data.name = normalizeName(body.name);
     if ("notify_webhook_url" in body) data.notify_webhook_url = body.notify_webhook_url ?? null;
-    if ("notify_conflicts" in body) data.notify_conflicts = body.notify_conflicts ? 1 : 0;
     if ("notify_sync" in body) data.notify_sync = body.notify_sync ? 1 : 0;
 
     const user = await this.prisma.user.update({ where: { id: userId }, data });
@@ -119,7 +117,6 @@ export class UsersService {
       email: user.email,
       name: user.name ?? null,
       notify_webhook_url: user.notify_webhook_url,
-      notify_conflicts: user.notify_conflicts !== 0,
       notify_sync: user.notify_sync !== 0,
     };
   }

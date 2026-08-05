@@ -52,14 +52,6 @@ async function signup(): Promise<{ token: string; userId: number }> {
   return { token: res.body.token, userId: res.body.user.id };
 }
 
-async function createMachine(token: string): Promise<{ id: number; machineToken: string }> {
-  const res = await request(app.getHttpServer())
-    .post("/api/machines")
-    .set("Authorization", `Bearer ${token}`)
-    .send({ name: `Machine-${rand()}` });
-  return { id: res.body.id, machineToken: res.body.token };
-}
-
 async function createProject(token: string): Promise<{ id: number; alias: string }> {
   const res = await request(app.getHttpServer())
     .post("/api/projects")
@@ -91,12 +83,11 @@ afterAll(async () => {
 });
 
 describe("RelayGcService.gcUser", () => {
-  it("deletes only blobs unreferenced by file_state.hash or an OPEN conflict's candidate_hash", async () => {
+  it("deletes only blobs unreferenced by file_state.hash", async () => {
     const { token, userId } = await signup();
-    const machine = await createMachine(token);
     const project = await createProject(token);
 
-    // H1: referenced by a file_state row.
+    // H1: referenced by a file_state row — must survive.
     const h1 = relayStore.writeBlob(userId, `canonical-${rand()}`);
     await prisma.fileState.create({
       data: {
@@ -107,50 +98,20 @@ describe("RelayGcService.gcUser", () => {
       },
     });
 
-    // H2: referenced by an OPEN conflict's candidate_hash.
-    const h2Content = `candidate-${rand()}`;
-    const h2 = relayStore.writeBlob(userId, h2Content);
-    const conflict = await prisma.conflict.create({
-      data: {
-        project_id: project.id,
-        filename: "other.jsonl",
-        machine_id: machine.id,
-        candidate_hash: h2,
-        auto_merged: 0,
-        status: "open",
-      },
-    });
-
-    // H3: referenced by nothing — an orphan. Backdated so it falls outside
+    // H2: referenced by nothing — an orphan (e.g. the previous canonical a
+    // last-write-wins push superseded). Backdated so it falls outside
     // gcOrphans's mtime grace window and is actually eligible for reclamation
     // in this test (a freshly-written orphan is intentionally skipped — see
     // relay-store.service.test.ts's grace-window tests).
-    const h3 = relayStore.writeBlob(userId, `orphan-${rand()}`);
-    backdateBlob(userId, h3);
+    const h2 = relayStore.writeBlob(userId, `orphan-${rand()}`);
+    backdateBlob(userId, h2);
 
     expect(relayStore.hasBlob(userId, h1)).toBe(true);
     expect(relayStore.hasBlob(userId, h2)).toBe(true);
-    expect(relayStore.hasBlob(userId, h3)).toBe(true);
 
     const reclaimed = await relayGc.gcUser(userId);
 
     expect(reclaimed).toBe(1);
-    expect(relayStore.hasBlob(userId, h1)).toBe(true);
-    expect(relayStore.hasBlob(userId, h2)).toBe(true);
-    expect(relayStore.hasBlob(userId, h3)).toBe(false);
-
-    // Resolving the conflict frees its candidate: h2 becomes reclaimable,
-    // h1 (still referenced by file_state) must survive. Backdate h2 too, for
-    // the same grace-window reason as h3 above.
-    await prisma.conflict.update({
-      where: { id: conflict.id },
-      data: { status: "resolved", resolved_at: new Date() },
-    });
-    backdateBlob(userId, h2);
-
-    const reclaimedAfterResolve = await relayGc.gcUser(userId);
-
-    expect(reclaimedAfterResolve).toBe(1);
     expect(relayStore.hasBlob(userId, h1)).toBe(true);
     expect(relayStore.hasBlob(userId, h2)).toBe(false);
   });

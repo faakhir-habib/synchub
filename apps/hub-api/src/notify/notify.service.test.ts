@@ -49,7 +49,7 @@ afterEach(() => {
 });
 
 async function createUser(
-  prefs: { notify_conflicts?: number; notify_sync?: number; notify_webhook_url?: string } = {},
+  prefs: { notify_sync?: number; notify_webhook_url?: string } = {},
 ) {
   const user = await prisma.user.create({
     data: {
@@ -72,31 +72,9 @@ async function expectEventually(assertion: () => void): Promise<void> {
   await vi.waitFor(assertion, { timeout: 1000, interval: 10 });
 }
 
-// Ports the gate logic in hub/src/lib/notify.js:9-10 exactly: only
-// type === "conflict" / "sync" are gated by the matching user preference;
+// Only type === "sync" is gated by the matching user preference (notify_sync);
 // every other type always proceeds.
 describe("NotifyService#notify", () => {
-  it("inserts a row for type=conflict when the user's notify_conflicts=1", async () => {
-    const user = await createUser({ notify_conflicts: 1 });
-
-    const note = await notify.notify({ user_id: user.id, type: "conflict", title: "Conflict!" });
-
-    expect(note).not.toBeNull();
-    expect(note!.type).toBe("conflict");
-    const rows = await prisma.notification.findMany({ where: { user_id: user.id } });
-    expect(rows).toHaveLength(1);
-  });
-
-  it("returns null and inserts nothing for type=conflict when notify_conflicts=0", async () => {
-    const user = await createUser({ notify_conflicts: 0 });
-
-    const note = await notify.notify({ user_id: user.id, type: "conflict", title: "Conflict!" });
-
-    expect(note).toBeNull();
-    const rows = await prisma.notification.findMany({ where: { user_id: user.id } });
-    expect(rows).toHaveLength(0);
-  });
-
   it("inserts a row for type=sync when the user's notify_sync=1", async () => {
     const user = await createUser({ notify_sync: 1 });
 
@@ -118,8 +96,8 @@ describe("NotifyService#notify", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("always inserts for a type other than conflict/sync, regardless of prefs", async () => {
-    const user = await createUser({ notify_conflicts: 0, notify_sync: 0 });
+  it("always inserts for a type other than sync, regardless of prefs", async () => {
+    const user = await createUser({ notify_sync: 0 });
 
     const note = await notify.notify({ user_id: user.id, type: "info", title: "Heads up" });
 
@@ -147,10 +125,10 @@ describe("NotifyService#notify", () => {
   });
 
   it("does NOT push over WS or insert a row when the notify is gated out", async () => {
-    const user = await createUser({ notify_conflicts: 0 });
+    const user = await createUser({ notify_sync: 0 });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null));
 
-    const note = await notify.notify({ user_id: user.id, type: "conflict", title: "Conflict!" });
+    const note = await notify.notify({ user_id: user.id, type: "sync", title: "Synced" });
 
     expect(note).toBeNull();
     expect(realtime.pushNotification).not.toHaveBeenCalled();

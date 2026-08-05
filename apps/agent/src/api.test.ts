@@ -136,21 +136,6 @@ describe("api client", () => {
       });
     });
 
-    it("treats a 409 conflict response as a valid ok:true outcome", async () => {
-      const responseBody = { status: "conflict", conflictId: 99 };
-      fetchSpy.mockResolvedValue(
-        fakeResponse({
-          status: 409,
-          ok: false,
-          body: JSON.stringify(responseBody),
-        }) as unknown as Response,
-      );
-
-      const api = createApi({ hubUrl: HUB, machineToken: TOKEN });
-      const result = await api.push(7, "file.txt", "hello", "prevhash");
-
-      expect(result).toEqual({ ok: true, data: responseBody });
-    });
   });
 
   describe("deleteFile", () => {

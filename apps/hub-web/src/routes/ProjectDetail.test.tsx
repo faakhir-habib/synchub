@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, within, fireEvent, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Conflict, PublicMachine } from "@synchub/shared";
+import type { PublicMachine } from "@synchub/shared";
 import { ApiError } from "../lib/api-error.js";
 import { timeAgo } from "../lib/format.js";
 
@@ -12,7 +12,6 @@ const {
   syncNowMock,
   upsertMappingMock,
   removeMappingMock,
-  getProjectConflictsMock,
   getMachinesMock,
 } = vi.hoisted(() => ({
   getProjectMock: vi.fn(),
@@ -20,7 +19,6 @@ const {
   syncNowMock: vi.fn(),
   upsertMappingMock: vi.fn(),
   removeMappingMock: vi.fn(),
-  getProjectConflictsMock: vi.fn(),
   getMachinesMock: vi.fn(),
 }));
 
@@ -30,7 +28,6 @@ vi.mock("@/lib/endpoints", () => ({
   syncNow: syncNowMock,
   upsertMapping: upsertMappingMock,
   removeMapping: removeMappingMock,
-  getProjectConflicts: getProjectConflictsMock,
   getMachines: getMachinesMock,
 }));
 
@@ -117,25 +114,6 @@ const MACHINES: PublicMachine[] = [
   },
 ];
 
-const CONFLICTS: Conflict[] = [
-  {
-    id: 1,
-    project_id: 1,
-    filename: "readme.md",
-    status: "open",
-    auto_merged: false,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 2,
-    project_id: 1,
-    filename: "old.txt",
-    status: "resolved",
-    auto_merged: true,
-    created_at: new Date().toISOString(),
-  },
-];
-
 function wrap(ui: ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
@@ -148,11 +126,9 @@ beforeEach(() => {
   syncNowMock.mockReset();
   upsertMappingMock.mockReset();
   removeMappingMock.mockReset();
-  getProjectConflictsMock.mockReset();
   getMachinesMock.mockReset();
   navigateMock.mockReset();
 
-  getProjectConflictsMock.mockResolvedValue(CONFLICTS);
   getMachinesMock.mockResolvedValue(MACHINES);
 
   // progress-store is module-level state (mirrors the live WS-driven store
@@ -177,7 +153,7 @@ describe("ProjectDetail", () => {
     await waitFor(() => expect(screen.getAllByTestId("skeleton").length).toBeGreaterThan(0));
   });
 
-  it("renders header, stats, mappings, activity, and open conflicts once loaded", async () => {
+  it("renders header, stats, mappings, and activity once loaded", async () => {
     getProjectMock.mockResolvedValue(PROJECT);
 
     const { ui } = wrap(<ProjectDetail projectId={1} />);
@@ -200,12 +176,6 @@ describe("ProjectDetail", () => {
 
     // activity feed
     expect(screen.getByText("notes.md")).toBeDefined();
-
-    // open conflicts (only the "open" one, not the "resolved" one)
-    await waitFor(() => expect(screen.getByText("readme.md")).toBeDefined());
-    expect(screen.queryByText("old.txt")).toBeNull();
-    const conflictsLink = screen.getByRole("link", { name: /resolve in conflicts/i });
-    expect(conflictsLink.getAttribute("href")).toBe("/conflicts");
   });
 
   it("triggers a sync when 'Sync now' is clicked", async () => {
@@ -340,7 +310,6 @@ describe("ProjectDetail", () => {
 
     expect(screen.getByText(/project not found/i)).toBeDefined();
     expect(getProjectMock).not.toHaveBeenCalled();
-    expect(getProjectConflictsMock).not.toHaveBeenCalled();
   });
 
   it("shows a live sync-progress indicator on setProgress and hides it again on clearProgress", async () => {

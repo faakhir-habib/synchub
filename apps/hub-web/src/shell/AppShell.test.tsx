@@ -44,7 +44,6 @@ const ME = {
   email: "ada@example.com",
   name: "Ada Lovelace",
   notify_webhook_url: null,
-  notify_conflicts: true,
   notify_sync: true,
 };
 
@@ -132,7 +131,6 @@ describe("AppShell", () => {
     expect(screen.getByRole("link", { name: /dashboard/i })).toBeDefined();
     expect(screen.getByRole("link", { name: /projects/i })).toBeDefined();
     expect(screen.getByRole("link", { name: /machines/i })).toBeDefined();
-    expect(screen.getByRole("link", { name: /conflicts/i })).toBeDefined();
     expect(screen.getByRole("link", { name: /notifications/i })).toBeDefined();
     expect(screen.getByRole("link", { name: /settings/i })).toBeDefined();
 

@@ -4,24 +4,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SyncMode } from "@synchub/shared";
 import {
   ArrowLeft,
-  ArrowRight,
-  CheckCircle2,
   Clock,
   Files,
   FolderKanban,
-  GitPullRequestArrow,
   Plus,
   RefreshCw,
   Server,
 } from "lucide-react";
 import { toast } from "sonner";
-import {
-  getProject,
-  getProjectConflicts,
-  setProjectSyncMode,
-  syncNow,
-  type ActivityEvent,
-} from "@/lib/endpoints";
+import { getProject, setProjectSyncMode, syncNow, type ActivityEvent } from "@/lib/endpoints";
 import { qk } from "@/lib/query-keys";
 import { ApiError } from "@/lib/api-error";
 import { timeAgo } from "@/lib/format";
@@ -162,13 +153,12 @@ interface ProjectDetailProps {
 }
 
 /**
- * Project detail screen — mappings, sync controls, activity, and open
- * conflicts for a single project. Realtime already invalidates
- * `qk.project(id)` and `qk.projectConflicts(id)` on `changed`/`sync-complete`/
- * `conflict` WS frames (realtime-provider), so this refetches live with no
- * extra wiring here. `sync-progress` frames additionally drive a live
- * progress bar via progress-store (see `useProjectProgress` below), cleared
- * automatically on `sync-complete`.
+ * Project detail screen — mappings, sync controls, and activity for a single
+ * project. Realtime already invalidates `qk.project(id)` on
+ * `changed`/`sync-complete` WS frames (realtime-provider), so this refetches
+ * live with no extra wiring here. `sync-progress` frames additionally drive a
+ * live progress bar via progress-store (see `useProjectProgress` below),
+ * cleared automatically on `sync-complete`.
  */
 export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const queryClient = useQueryClient();
@@ -184,11 +174,6 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const project = useQuery({
     queryKey: qk.project(projectId),
     queryFn: () => getProject(projectId),
-    enabled: validId,
-  });
-  const conflicts = useQuery({
-    queryKey: qk.projectConflicts(projectId),
-    queryFn: () => getProjectConflicts(projectId),
     enabled: validId,
   });
 
@@ -253,7 +238,6 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const data = project.data;
   const { label: syncModeLabel, badgeVariant } = SYNC_MODE_DISPLAY[data.sync_mode];
   const existingMachineIds = data.mappings.map((m) => m.machine_id);
-  const openConflicts = (conflicts.data ?? []).filter((c) => c.status === "open");
 
   return (
     <div className="flex flex-col gap-6">
@@ -302,7 +286,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         />
       ) : null}
 
-      <section aria-label="Project stats" className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section aria-label="Project stats" className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard index={0} label="Tracked files" icon={Files} accent="primary" value={data.tracked_files} />
         <StatCard
           index={1}
@@ -312,15 +296,6 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           value={data.last_sync_at ? timeAgo(data.last_sync_at) : "Never"}
         />
         <StatCard index={2} label="Mappings" icon={Server} accent="success" value={data.mappings.length} />
-        <StatCard
-          index={3}
-          label="Open conflicts"
-          icon={GitPullRequestArrow}
-          accent={openConflicts.length > 0 ? "warning" : "success"}
-          isLoading={conflicts.isPending}
-          value={openConflicts.length}
-          hint={openConflicts.length > 0 ? "Needs review" : "All clear"}
-        />
       </section>
 
       <Card>
@@ -372,62 +347,18 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader className="pb-4">
-            <CardTitle className="text-lg">Activity</CardTitle>
-            <CardDescription>Pushes, merges, and conflicts for this project.</CardDescription>
-          </CardHeader>
-          <CardContent className="pt-0">
-            {/* Capped height + internal scroll so a long feed doesn't grow the page. */}
-            <div className="scroll-themed max-h-[28rem] overflow-y-auto">
-              <ActivityFeed events={data.activity as ActivityEvent[]} />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-4">
-            <CardTitle className="text-lg">Open conflicts</CardTitle>
-            <CardDescription>Files that need a manual pick.</CardDescription>
-          </CardHeader>
-          <CardContent className="pt-0">
-            {conflicts.isError ? (
-              <ErrorPanel error={conflicts.error} />
-            ) : openConflicts.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-2 py-8 text-center">
-                <span className="grid h-9 w-9 place-items-center rounded-xl bg-success/10 text-success">
-                  <CheckCircle2 className="h-4 w-4" />
-                </span>
-                <p className="text-xs text-muted-foreground">No open conflicts.</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <ul className="space-y-2">
-                  {openConflicts.slice(0, 5).map((c) => (
-                    <li
-                      key={c.id}
-                      className="flex items-center justify-between gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2"
-                    >
-                      <span className="truncate font-mono text-xs text-foreground">{c.filename}</span>
-                      <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-warning">
-                        Needs resolution
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-                <Link
-                  to="/conflicts"
-                  className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-                >
-                  Resolve in Conflicts
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Link>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardHeader className="pb-4">
+          <CardTitle className="text-lg">Activity</CardTitle>
+          <CardDescription>Pushes and syncs for this project.</CardDescription>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {/* Capped height + internal scroll so a long feed doesn't grow the page. */}
+          <div className="scroll-themed max-h-[28rem] overflow-y-auto">
+            <ActivityFeed events={data.activity as ActivityEvent[]} />
+          </div>
+        </CardContent>
+      </Card>
 
       <AddMappingDialog
         projectId={projectId}

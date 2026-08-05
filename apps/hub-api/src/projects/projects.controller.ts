@@ -12,7 +12,6 @@ import {
 } from "@nestjs/common";
 import type { User } from "@prisma/client";
 import { ProjectsService } from "./projects.service.js";
-import { ConflictsService } from "../conflicts/conflicts.service.js";
 import { SessionAuthGuard } from "../common/auth/session-auth.guard.js";
 import { CurrentUser } from "../common/auth/current-user.decorator.js";
 import { zodBody } from "../common/validation/zod.pipe.js";
@@ -20,21 +19,15 @@ import {
   MappingUpsertRequest,
   ProjectCreateRequest,
   ProjectUpdateRequest,
-  ResolveConflictRequest,
   SyncModeRequest,
 } from "@synchub/shared";
 
 // Ports legacy hub/src/routes/projects.js, mounted at /api/projects (global
-// "api" prefix). All routes require a session. Conflict resolution
-// (Phase 2b) delegates to ConflictsService, which owns the actual resolve
-// logic.
+// "api" prefix). All routes require a session.
 @Controller("projects")
 @UseGuards(SessionAuthGuard)
 export class ProjectsController {
-  constructor(
-    private readonly projects: ProjectsService,
-    private readonly conflicts: ConflictsService,
-  ) {}
+  constructor(private readonly projects: ProjectsService) {}
 
   @Get()
   list(@CurrentUser() user: User) {
@@ -101,30 +94,5 @@ export class ProjectsController {
   @HttpCode(200)
   syncNow(@CurrentUser() user: User, @Param("id", ParseIntPipe) id: number) {
     return this.projects.syncNow(user.id, id);
-  }
-
-  @Get(":id/conflicts")
-  listConflicts(@CurrentUser() user: User, @Param("id", ParseIntPipe) id: number) {
-    return this.projects.listOpenConflicts(user.id, id);
-  }
-
-  @Get(":id/conflicts/:conflictId/content")
-  getConflictContent(
-    @CurrentUser() user: User,
-    @Param("id", ParseIntPipe) id: number,
-    @Param("conflictId", ParseIntPipe) conflictId: number,
-  ) {
-    return this.conflicts.getContent(user.id, id, conflictId);
-  }
-
-  @Post(":id/conflicts/:conflictId/resolve")
-  @HttpCode(200)
-  resolveConflict(
-    @CurrentUser() user: User,
-    @Param("id", ParseIntPipe) id: number,
-    @Param("conflictId", ParseIntPipe) conflictId: number,
-    @Body(zodBody(ResolveConflictRequest)) body: ResolveConflictRequest,
-  ) {
-    return this.conflicts.resolve(user.id, id, conflictId, body.choice, body.content);
   }
 }

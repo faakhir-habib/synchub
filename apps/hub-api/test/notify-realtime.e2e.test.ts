@@ -155,13 +155,13 @@ describe("NotifyService -> RealtimeGateway live WS push", () => {
 
   it("does not deliver a frame when the notify is gated out by the user's preferences", async () => {
     const { token, userId } = await signup();
-    await prisma.user.update({ where: { id: userId }, data: { notify_conflicts: 0 } });
+    await prisma.user.update({ where: { id: userId }, data: { notify_sync: 0 } });
 
     const user = connect(`ws://127.0.0.1:${port}/ws/user?token=${token}`);
     await waitForOpen(user.ws);
     await user.nextMessageOfType("welcome");
 
-    const note = await notify.notify({ user_id: userId, type: "conflict", title: "Conflict!" });
+    const note = await notify.notify({ user_id: userId, type: "sync", title: "Synced" });
     expect(note).toBeNull();
 
     await expect(user.nextMessage(400)).rejects.toThrow(/timed out/);

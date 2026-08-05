@@ -18,7 +18,6 @@ model User {
   name               String?
   notify_webhook_url String?
   // Int-as-boolean (SQLite has no bool). API must map Int->boolean; see @synchub/shared api.ts.
-  notify_conflicts   Int            @default(1)
   notify_sync        Int            @default(1)
   created_at         DateTime       @default(now())
   sessions           Session[]
@@ -58,7 +57,6 @@ model Machine {
   mappings      Mapping[]
   pairingCodes  PairingCode[]
   fileStates    FileState[]
-  conflicts     Conflict[]
   events        Event[]
 
   @@map("machines")
@@ -85,7 +83,6 @@ model Project {
   user       User        @relation(fields: [user_id], references: [id], onDelete: Cascade)
   mappings   Mapping[]
   fileStates FileState[]
-  conflicts  Conflict[]
   events     Event[]
 
   @@unique([user_id, alias])
@@ -120,31 +117,6 @@ model FileState {
   @@unique([project_id, filename])
   @@index([project_id])
   @@map("file_state")
-}
-
-model Conflict {
-  id             Int       @id @default(autoincrement())
-  project_id     Int
-  filename       String
-  machine_id     Int?
-  candidate_hash String
-  auto_merged    Int       @default(0)
-  status         String    @default("open")
-  created_at     DateTime  @default(now())
-  resolved_at    DateTime?
-  project        Project   @relation(fields: [project_id], references: [id], onDelete: Cascade)
-  machine        Machine?  @relation(fields: [machine_id], references: [id], onDelete: SetNull)
-
-  // NOTE: migration 20260801205430_uniq_open_conflict additionally creates a
-  // hand-written PARTIAL unique index that Prisma's schema language cannot
-  // express and which is therefore NOT declared below:
-  //   CREATE UNIQUE INDEX "uniq_open_conflict" ON "conflicts"("project_id", "filename") WHERE "status" = 'open';
-  // It enforces at most one OPEN conflict per (project_id, filename). The
-  // migration file is the source of truth for this constraint — do not let
-  // a future `prisma migrate dev`/`migrate diff` drop it by "fixing" a
-  // perceived schema drift.
-  @@index([project_id, status])
-  @@map("conflicts")
 }
 
 model Notification {

@@ -84,7 +84,6 @@ describe("shared schemas round-trip", () => {
     const ok = DashboardMetrics.parse({
       projects: { total: 3, syncing: 1 },
       machines: { total: 5, online: 2 },
-      openConflicts: 0,
       eventsToday: 12,
       dataTransferredBytes: 4096,
       sessionsSyncedToday: 7,

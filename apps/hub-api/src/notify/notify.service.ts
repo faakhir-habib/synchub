@@ -30,10 +30,8 @@ export class NotifyService {
     const user = await this.prisma.user.findUnique({ where: { id: user_id } });
     if (!user) return null;
 
-    // Respect the user's notification preferences — ported exactly from
-    // hub/src/lib/notify.js:9-10. Only "conflict" and "sync" are gated by
-    // their matching preference; every other type always proceeds.
-    if (type === "conflict" && user.notify_conflicts === 0) return null;
+    // Respect the user's notification preferences. Only "sync" is gated by
+    // its matching preference; every other type always proceeds.
     if (type === "sync" && user.notify_sync === 0) return null;
 
     const note = await this.prisma.notification.create({

@@ -55,21 +55,14 @@ export class SyncController {
 
   @Post("push/:projectId")
   @HttpCode(200)
-  async push(
+  push(
     @CurrentMachine() machine: Machine,
     @Param("projectId", ParseIntPipe) projectId: number,
     @Body(zodBody(PushRequest)) body: PushRequest,
-    @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.sync.push(machine, projectId, body);
-    // The "conflict" branch must come back as HTTP 409 with a body that is
-    // EXACTLY {status:"conflict", conflictId} — set the status explicitly
-    // (passthrough response) rather than throwing, so AllExceptionsFilter's
-    // {error,code} reshaping never touches this body.
-    if (result.status === "conflict") {
-      res.status(409);
-    }
-    return result;
+    // Sync is last-write-wins: a push always resolves to 200
+    // accepted/unchanged (there is no conflict / 409 outcome).
+    return this.sync.push(machine, projectId, body);
   }
 
   @Post("delete/:projectId")

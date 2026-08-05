@@ -33,10 +33,6 @@ interface TodayRow {
   events: bigint | number;
   bytes: bigint | number;
 }
-interface WeekRow {
-  ok: bigint | number;
-  conflict: bigint | number;
-}
 interface LatRow {
   a: number | null;
 }
@@ -61,10 +57,8 @@ export class DashboardService {
     const [
       [projectsRow],
       [machinesRow],
-      [openConflictsRow],
       [todayRow],
       [sessionsRow],
-      [weekRow],
       [latRow],
       [unreadRow],
     ] = await Promise.all([
@@ -76,23 +70,14 @@ export class DashboardService {
         SELECT COUNT(*) n, COALESCE(SUM(CASE WHEN status = 'online' THEN 1 ELSE 0 END), 0) online
         FROM machines WHERE user_id = ${userId}
       `,
-      this.prisma.$queryRaw<CountRow[]>`
-        SELECT COUNT(*) n FROM conflicts c JOIN projects p ON p.id = c.project_id
-        WHERE p.user_id = ${userId} AND c.status = 'open'
-      `,
       this.prisma.$queryRaw<TodayRow[]>`
         SELECT COUNT(*) events, COALESCE(SUM(bytes), 0) bytes FROM events
         WHERE user_id = ${userId} AND date(created_at / 1000, 'unixepoch') = date('now')
       `,
       this.prisma.$queryRaw<CountRow[]>`
         SELECT COUNT(DISTINCT project_id || '/' || filename) n FROM events
-        WHERE user_id = ${userId} AND filename IS NOT NULL AND type IN ('push','auto_merge')
+        WHERE user_id = ${userId} AND filename IS NOT NULL AND type = 'push'
           AND date(created_at / 1000, 'unixepoch') = date('now')
-      `,
-      this.prisma.$queryRaw<WeekRow[]>`
-        SELECT COALESCE(SUM(CASE WHEN type IN ('push','auto_merge') THEN 1 ELSE 0 END), 0) ok,
-               COALESCE(SUM(CASE WHEN type = 'conflict' THEN 1 ELSE 0 END), 0) conflict
-        FROM events WHERE user_id = ${userId} AND created_at >= (strftime('%s','now','-7 days') * 1000)
       `,
       this.prisma.$queryRaw<LatRow[]>`
         SELECT AVG(latency_ms) a FROM events
@@ -103,19 +88,15 @@ export class DashboardService {
       `,
     ]);
 
-    const ok = Number(weekRow.ok);
-    const conflictCount = Number(weekRow.conflict);
-    const denom = ok + conflictCount;
-    // Legacy default: an empty trailing-7-day window counts as 100% success,
-    // not 0% — there's nothing to have failed.
-    const syncSuccessRate = denom > 0 ? Math.round((ok / denom) * 1000) / 10 : 100;
+    // Sync is last-write-wins: every push succeeds — there is no conflict or
+    // failure outcome to track — so the success rate is always 100%.
+    const syncSuccessRate = 100;
 
     const avgLatencyMs = latRow.a != null ? Math.round(Number(latRow.a)) : null;
 
     return {
       projects: { total: Number(projectsRow.n), syncing: Number(projectsRow.syncing) },
       machines: { total: Number(machinesRow.n), online: Number(machinesRow.online) },
-      openConflicts: Number(openConflictsRow.n),
       eventsToday: Number(todayRow.events),
       dataTransferredBytes: Number(todayRow.bytes),
       sessionsSyncedToday: Number(sessionsRow.n),

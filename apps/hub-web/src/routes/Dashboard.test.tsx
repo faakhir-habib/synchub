@@ -21,7 +21,6 @@ import { Dashboard } from "./Dashboard.js";
 const METRICS: DashboardMetrics = {
   projects: { total: 7, syncing: 2 },
   machines: { total: 4, online: 3 },
-  openConflicts: 1,
   eventsToday: 42,
   dataTransferredBytes: 5_242_880,
   sessionsSyncedToday: 15,
@@ -47,7 +46,7 @@ const ACTIVITY: ActivityEvent[] = [
     user_id: 1,
     machine_id: 2,
     project_id: 3,
-    type: "conflict",
+    type: "sync_now",
     filename: "src/app.ts",
     bytes: 0,
     latency_ms: null,
@@ -88,7 +87,6 @@ describe("Dashboard", () => {
     expect(screen.getByText("2 syncing now")).toBeDefined();
     expect(screen.getByText("4")).toBeDefined(); // connected machines
     expect(screen.getByText("3 online")).toBeDefined();
-    expect(screen.getByText("1")).toBeDefined(); // open conflicts
     expect(screen.getByText("97%")).toBeDefined(); // sync success rate
 
     // secondary "sync engine" metrics
@@ -100,7 +98,7 @@ describe("Dashboard", () => {
     expect(screen.getByText("src/index.ts")).toBeDefined();
     expect(screen.getByText("src/app.ts")).toBeDefined();
     expect(screen.getByText("File pushed")).toBeDefined();
-    expect(screen.getByText("Conflict detected")).toBeDefined();
+    expect(screen.getByText("Manual sync")).toBeDefined();
 
     expect(screen.queryAllByTestId("skeleton").length).toBe(0);
   });

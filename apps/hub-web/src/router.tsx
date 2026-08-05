@@ -9,7 +9,6 @@ import { Dashboard } from "./routes/Dashboard.js";
 import { Projects } from "./routes/Projects.js";
 import { ProjectDetail } from "./routes/ProjectDetail.js";
 import { Machines } from "./routes/Machines.js";
-import { Conflicts } from "./routes/Conflicts.js";
 import { Notifications } from "./routes/Notifications.js";
 import { Settings } from "./routes/Settings.js";
 import { AuthGuard } from "./auth/AuthGuard.js";
@@ -63,11 +62,6 @@ const machinesRoute = createRoute({
   path: "/machines",
   component: Machines,
 });
-const conflictsRoute = createRoute({
-  getParentRoute: () => appLayoutRoute,
-  path: "/conflicts",
-  component: Conflicts,
-});
 const notificationsRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: "/notifications",
@@ -96,7 +90,6 @@ const routeTree = rootRoute.addChildren([
     projectsRoute,
     projectDetailRoute,
     machinesRoute,
-    conflictsRoute,
     notificationsRoute,
     settingsRoute,
   ]),

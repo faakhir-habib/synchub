@@ -6,8 +6,6 @@ import { join } from "node:path";
 import type { Machine } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { RelayStoreService } from "./relay-store.service.js";
-import { MergeService } from "./merge.service.js";
-import { NotifyService } from "../notify/notify.service.js";
 import { SyncService } from "./sync.service.js";
 import type { RealtimePort } from "../realtime/realtime.port.js";
 
@@ -51,8 +49,7 @@ beforeEach(() => {
     pushNotification: vi.fn(),
     triggerSync: vi.fn(),
   };
-  const notify = new NotifyService(prisma, realtime);
-  sync = new SyncService(prisma, relayStore, new MergeService(), notify, realtime);
+  sync = new SyncService(prisma, relayStore, realtime);
 });
 
 afterEach(() => {

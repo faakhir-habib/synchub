@@ -19,9 +19,6 @@ import {
   PairCreateResponse,
   DashboardMetrics,
   NotificationsSummary,
-  Conflict,
-  ResolveConflictRequest,
-  ConflictContentResponse,
 } from "@synchub/shared";
 import { get, post, put, del } from "./api.js";
 
@@ -43,29 +40,9 @@ export type ProjectMapping = z.infer<typeof ProjectMapping>;
 export const SyncNowResponse = z.object({ status: z.literal("triggered") });
 export type SyncNowResponse = z.infer<typeof SyncNowResponse>;
 
-/** POST /api/projects/:id/conflicts/:conflictId/resolve response. */
-export const ResolveConflictResponse = z.object({
-  status: z.literal("resolved"),
-  choice: z.enum(["candidate", "canonical", "manual"]),
-});
-export type ResolveConflictResponse = z.infer<typeof ResolveConflictResponse>;
-
 /** PUT /api/auth/me/notify-webhook response. */
 export const NotifyWebhookResponse = z.object({ notify_webhook_url: z.string().nullable() });
 export type NotifyWebhookResponse = z.infer<typeof NotifyWebhookResponse>;
-
-/**
- * GET /api/conflicts item — a Conflict row plus the alias of the project it
- * belongs to (cross-project "all my open conflicts" view). No shared schema
- * exists for this joined shape (see hub-api ConflictWithProjectAlias).
- */
-export const ConflictWithProjectAlias = Conflict.extend({
-  machine_id: z.number().int().nullable(),
-  candidate_hash: z.string(),
-  resolved_at: z.string().nullable(),
-  project_alias: z.string(),
-});
-export type ConflictWithProjectAlias = z.infer<typeof ConflictWithProjectAlias>;
 
 /**
  * GET /api/dashboard/activity item. No shared schema exists for this shape
@@ -148,29 +125,6 @@ export function syncNow(id: number) {
   return post(`/api/projects/${id}/sync-now`, undefined, SyncNowResponse);
 }
 
-export function getProjectConflicts(id: number) {
-  return get(`/api/projects/${id}/conflicts`, z.array(Conflict));
-}
-
-export function resolveConflict(
-  projectId: number,
-  conflictId: number,
-  body: ResolveConflictRequest,
-) {
-  return post(
-    `/api/projects/${projectId}/conflicts/${conflictId}/resolve`,
-    body,
-    ResolveConflictResponse,
-  );
-}
-
-export function getConflictContent(projectId: number, conflictId: number) {
-  return get(
-    `/api/projects/${projectId}/conflicts/${conflictId}/content`,
-    ConflictContentResponse,
-  );
-}
-
 // ---- machines ----
 
 export function getMachines() {
@@ -187,12 +141,6 @@ export function deleteMachine(id: number) {
 
 export function pairMachine() {
   return post("/api/machines/pair", undefined, PairCreateResponse);
-}
-
-// ---- conflicts ----
-
-export function getConflicts() {
-  return get("/api/conflicts", z.array(ConflictWithProjectAlias));
 }
 
 // ---- notifications ----

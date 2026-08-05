@@ -125,8 +125,6 @@ export function createApi({ hubUrl, machineToken }: { hubUrl: string; machineTok
         {
           body: { filename, content, base_hash: baseHash },
           schema: PushResponse,
-          // A 409 conflict is a valid, expected push outcome — not an error.
-          acceptStatuses: [409],
         },
       ),
 

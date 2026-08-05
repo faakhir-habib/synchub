@@ -192,14 +192,14 @@ describe("POST /api/agent/push/:projectId", () => {
     expect(fileState!.hash).toBe(second.body.hash);
   });
 
-  it("divergent-but-mergeable append: merged, union ordered by timestamp, auto_merge event, sync notification, NO conflict row", async () => {
+  it("divergent push (last-write-wins): incoming overwrites canonical wholesale, plain push event, NO merge", async () => {
     const { userId, machine, project } = await setup();
     const filename = "session.jsonl";
 
     const line1 = '{"seq":1,"timestamp":100}';
     const line2 = '{"seq":2,"timestamp":200}';
     const lineA3 = '{"seq":3,"timestamp":300,"from":"a"}'; // canonical's own tail line
-    const lineB3 = '{"seq":3,"timestamp":250,"from":"b"}'; // incoming's own tail line, EARLIER timestamp
+    const lineB3 = '{"seq":3,"timestamp":250,"from":"b"}'; // incoming's own tail line
 
     const canonicalContent = `${line1}\n${line2}\n${lineA3}\n`;
     const canonicalHash = relayStore.writeBlob(userId, canonicalContent);
@@ -213,7 +213,7 @@ describe("POST /api/agent/push/:projectId", () => {
     });
 
     const incomingContent = `${line1}\n${line2}\n${lineB3}\n`;
-    // Stale base_hash: what this machine last knew (before "a" appended lineA3).
+    // base_hash is ignored under last-write-wins; pass a stale one to prove it.
     const staleBaseHash = sha256(`${line1}\n${line2}\n`);
 
     const res = await push(machine.machineToken, project.id, {
@@ -223,33 +223,30 @@ describe("POST /api/agent/push/:projectId", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe("merged");
+    expect(res.body.status).toBe("accepted");
 
-    // Union ordered by timestamp: lineB3 (250) sorts before lineA3 (300).
-    const expectedMerged = `${line1}\n${line2}\n${lineB3}\n${lineA3}\n`;
-    expect(res.body.hash).toBe(sha256(expectedMerged));
-    expect(relayStore.readBlob(userId, res.body.hash)).toBe(expectedMerged);
+    // Last-write-wins: canonical becomes EXACTLY the incoming content — no
+    // union, no timestamp reordering, lineA3 is dropped.
+    expect(res.body.hash).toBe(sha256(incomingContent));
+    expect(relayStore.readBlob(userId, res.body.hash)).toBe(incomingContent);
 
     const fileState = await prisma.fileState.findUnique({
       where: { project_id_filename: { project_id: project.id, filename } },
     });
     expect(fileState!.hash).toBe(res.body.hash);
 
+    // Recorded as a plain push — the "auto_merge" event type no longer exists.
+    const pushEvent = await prisma.event.findFirst({
+      where: { project_id: project.id, filename, type: "push" },
+    });
+    expect(pushEvent).not.toBeNull();
     const autoMergeEvent = await prisma.event.findFirst({
       where: { project_id: project.id, filename, type: "auto_merge" },
     });
-    expect(autoMergeEvent).not.toBeNull();
-
-    const notification = await prisma.notification.findFirst({
-      where: { user_id: userId, type: "sync" },
-    });
-    expect(notification).not.toBeNull();
-
-    const conflictCount = await prisma.conflict.count({ where: { project_id: project.id } });
-    expect(conflictCount).toBe(0);
+    expect(autoMergeEvent).toBeNull();
   });
 
-  it("true conflict (invalid-JSON tail): 409 {status:'conflict', conflictId}, open conflict row, candidate blob under full hash, conflict notification + event", async () => {
+  it("non-JSON / edited content (last-write-wins): overwrites canonical, no conflict", async () => {
     const { userId, machine, project } = await setup();
     const filename = "session.jsonl";
 
@@ -268,7 +265,8 @@ describe("POST /api/agent/push/:projectId", () => {
       },
     });
 
-    // Tail line is not valid JSON — not safely mergeable.
+    // Tail line is not valid JSON — under the old merge engine this was a
+    // "conflict"; under last-write-wins it simply overwrites.
     const incomingContent = `${line1}\n${line2}\nnot-valid-json\n`;
 
     const res = await push(machine.machineToken, project.id, {
@@ -277,40 +275,24 @@ describe("POST /api/agent/push/:projectId", () => {
       base_hash: null,
     });
 
-    expect(res.status).toBe(409);
-    expect(res.body.status).toBe("conflict");
-    expect(typeof res.body.conflictId).toBe("number");
-    expect(Object.keys(res.body).sort()).toEqual(["conflictId", "status"]);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("accepted");
+    expect(res.body.hash).toBe(sha256(incomingContent));
+    expect(relayStore.readBlob(userId, res.body.hash)).toBe(incomingContent);
 
-    const conflict = await prisma.conflict.findUnique({ where: { id: res.body.conflictId } });
-    expect(conflict).not.toBeNull();
-    expect(conflict!.status).toBe("open");
-    expect(conflict!.project_id).toBe(project.id);
-    expect(conflict!.filename).toBe(filename);
-
-    // Candidate blob is stored keyed by its FULL hash and holds the full
-    // pushed content.
-    expect(conflict!.candidate_hash).toBe(sha256(incomingContent));
-    expect(relayStore.readBlob(userId, conflict!.candidate_hash)).toBe(incomingContent);
-
-    // Canonical must be untouched.
+    // Canonical is now the incoming content.
     const fileState = await prisma.fileState.findUnique({
       where: { project_id_filename: { project_id: project.id, filename } },
     });
-    expect(fileState!.hash).toBe(canonicalHash);
+    expect(fileState!.hash).toBe(sha256(incomingContent));
 
-    const conflictEvent = await prisma.event.findFirst({
-      where: { project_id: project.id, filename, type: "conflict" },
+    const pushEvent = await prisma.event.findFirst({
+      where: { project_id: project.id, filename, type: "push" },
     });
-    expect(conflictEvent).not.toBeNull();
-
-    const notification = await prisma.notification.findFirst({
-      where: { user_id: userId, type: "conflict" },
-    });
-    expect(notification).not.toBeNull();
+    expect(pushEvent).not.toBeNull();
   });
 
-  it("one-open-conflict-per-file guard: two concurrent conflict-producing pushes to the SAME file only ever open ONE conflict row, and both responses 409 with a conflictId", async () => {
+  it("two concurrent unmergeable pushes to the SAME file: both accepted, canonical is one of them (last-write-wins)", async () => {
     const { userId, machine, project } = await setup();
     const filename = "session.jsonl";
 
@@ -329,7 +311,6 @@ describe("POST /api/agent/push/:projectId", () => {
       },
     });
 
-    // Two different invalid (unmergeable) tails, both diverging from canonical.
     const contentX = `${line1}\n${line2}\nnot-valid-json-x\n`;
     const contentY = `${line1}\n${line2}\nnot-valid-json-y\n`;
 
@@ -338,22 +319,21 @@ describe("POST /api/agent/push/:projectId", () => {
       push(machine.machineToken, project.id, { filename, content: contentY, base_hash: null }),
     ]);
 
-    expect(resX.status).toBe(409);
-    expect(resY.status).toBe(409);
-    expect(resX.body.status).toBe("conflict");
-    expect(resY.body.status).toBe("conflict");
-    expect(typeof resX.body.conflictId).toBe("number");
-    expect(typeof resY.body.conflictId).toBe("number");
-    // Both pushes must resolve to the SAME open conflict row.
-    expect(resX.body.conflictId).toBe(resY.body.conflictId);
+    expect(resX.status).toBe(200);
+    expect(resY.status).toBe(200);
+    expect(resX.body.status).toBe("accepted");
+    expect(resY.body.status).toBe("accepted");
 
-    const openConflicts = await prisma.conflict.count({
-      where: { project_id: project.id, filename, status: "open" },
+    // Exactly one of the two pushes wins the canonical slot (whichever
+    // committed last) — no conflict, no union.
+    const fileState = await prisma.fileState.findUnique({
+      where: { project_id_filename: { project_id: project.id, filename } },
     });
-    expect(openConflicts).toBe(1);
+    const finalContent = relayStore.readBlob(userId, fileState!.hash);
+    expect([contentX, contentY]).toContain(finalContent);
   });
 
-  it("base_hash is advisory-only: a lying base_hash cannot overwrite canonical (data-loss guard)", async () => {
+  it("an older/shorter push still overwrites canonical (last-write-wins, base_hash ignored)", async () => {
     const { userId, machine, project } = await setup();
     const filename = "session.jsonl";
 
@@ -371,35 +351,34 @@ describe("POST /api/agent/push/:projectId", () => {
       },
     });
 
-    // Stale 2-line content, but LIES that base_hash === current canonical
-    // hash. A naive "base_hash === current.hash => blind write" would drop
-    // line3. base_hash must be advisory-only.
+    // A stale 2-line copy. Under last-write-wins the latest push always wins,
+    // so this overwrites the 3-line canonical (line3 is intentionally lost —
+    // that is the accepted semantics of last-write-wins). base_hash plays no
+    // part in the decision.
     const staleContent = `${line1}\n${line2}\n`;
 
     const res = await push(machine.machineToken, project.id, {
       filename,
       content: staleContent,
-      base_hash: canonicalHash, // lying
+      base_hash: canonicalHash,
     });
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ status: "behind", hash: canonicalHash });
+    expect(res.body.status).toBe("accepted");
+    expect(res.body.hash).toBe(sha256(staleContent));
 
     const fileState = await prisma.fileState.findUnique({
       where: { project_id_filename: { project_id: project.id, filename } },
     });
-    expect(fileState!.hash).toBe(canonicalHash);
-    expect(relayStore.readBlob(userId, canonicalHash)).toBe(canonicalContent);
+    expect(fileState!.hash).toBe(sha256(staleContent));
+    expect(relayStore.readBlob(userId, sha256(staleContent))).toBe(staleContent);
   });
 
-  // This is deterministic regardless of actual scheduling/interleaving: the
-  // merge tail is sorted by each line's own `timestamp` field, not by which
-  // writer committed first, so the final union order is the same whether
-  // the two pushes truly race (one loses its CAS and retries against the
-  // other's committed result) or happen to run fully serialized (the second
-  // just reads the already-updated canonical on its first attempt). Either
-  // way, both lines must survive — that's the property under test.
-  it("concurrent divergent pushes to the SAME file do not lose an update (CAS + retry)", async () => {
+  // Two machines push different content to the same file at the same moment.
+  // The canonical write is CAS-guarded, so a loser retries against the fresh
+  // canonical and overwrites it — the final canonical is exactly ONE machine's
+  // content (last-write-wins), never a corrupted mix and never a conflict.
+  it("concurrent divergent pushes to the SAME file: last-write-wins, canonical is one machine's content", async () => {
     const { userId, machine, project } = await setup();
     const filename = "session.jsonl";
 
@@ -416,17 +395,11 @@ describe("POST /api/agent/push/:projectId", () => {
       },
     });
 
-    // Two machines each append their OWN different third line on top of the
-    // same 2-line canonical, at the same moment.
     const lineX = '{"seq":3,"timestamp":300,"from":"x"}';
-    const lineY = '{"seq":3,"timestamp":250,"from":"y"}'; // earlier timestamp
+    const lineY = '{"seq":3,"timestamp":250,"from":"y"}';
     const contentX = `${line1}\n${line2}\n${lineX}\n`;
     const contentY = `${line1}\n${line2}\n${lineY}\n`;
 
-    // Fire both pushes concurrently — without CAS+retry, whichever write
-    // commits last would silently overwrite canonical with only its own
-    // tail, dropping the other machine's line despite both requests
-    // reporting a 200.
     const [resX, resY] = await Promise.all([
       push(machine.machineToken, project.id, { filename, content: contentX, base_hash: canonicalHash }),
       push(machine.machineToken, project.id, { filename, content: contentY, base_hash: canonicalHash }),
@@ -434,8 +407,8 @@ describe("POST /api/agent/push/:projectId", () => {
 
     expect(resX.status).toBe(200);
     expect(resY.status).toBe(200);
-    expect(["accepted", "merged"]).toContain(resX.body.status);
-    expect(["accepted", "merged"]).toContain(resY.body.status);
+    expect(resX.body.status).toBe("accepted");
+    expect(resY.body.status).toBe("accepted");
 
     const fileState = await prisma.fileState.findUnique({
       where: { project_id_filename: { project_id: project.id, filename } },
@@ -443,15 +416,8 @@ describe("POST /api/agent/push/:projectId", () => {
     expect(fileState).not.toBeNull();
 
     const finalContent = relayStore.readBlob(userId, fileState!.hash);
-    expect(finalContent).not.toBeNull();
-
-    // No lost update: BOTH machines' lines survive, unioned and ordered by
-    // timestamp (lineY's 250 sorts before lineX's 300) regardless of commit order.
-    expect(finalContent).toBe(`${line1}\n${line2}\n${lineY}\n${lineX}\n`);
-
-    // The race must resolve via merge, never a spurious conflict row.
-    const conflictCount = await prisma.conflict.count({ where: { project_id: project.id, filename } });
-    expect(conflictCount).toBe(0);
+    // Last-write-wins: canonical is exactly one machine's content, intact.
+    expect([contentX, contentY]).toContain(finalContent);
   });
 
   it("returns 404 for a project the machine is not mapped to", async () => {

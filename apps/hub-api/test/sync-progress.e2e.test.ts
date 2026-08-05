@@ -303,7 +303,7 @@ describe("push -> live sync-progress/sync-complete to the pushing user's browser
     user.ws.close();
   });
 
-  it("divergent-but-mergeable push (merged): emits sync-progress then sync-complete", async () => {
+  it("divergent push (last-write-wins, accepted): emits sync-progress then sync-complete", async () => {
     const { token, userId, machine, project } = await setup();
     const filename = "session.jsonl";
 
@@ -336,7 +336,7 @@ describe("push -> live sync-progress/sync-complete to the pushing user's browser
       base_hash: staleBaseHash,
     });
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe("merged");
+    expect(res.body.status).toBe("accepted");
 
     const progress = await user.nextMessageOfType("sync-progress");
     expect(progress).toEqual({
@@ -386,7 +386,7 @@ describe("push -> live sync-progress/sync-complete to the pushing user's browser
     user.ws.close();
   });
 
-  it("true conflict: does NOT emit sync-progress or sync-complete (surfaces via conflict notification instead)", async () => {
+  it("unmergeable/edited push (last-write-wins, accepted): still emits sync-progress then sync-complete", async () => {
     const { token, userId, machine, project } = await setup();
     const filename = "session.jsonl";
 
@@ -405,6 +405,8 @@ describe("push -> live sync-progress/sync-complete to the pushing user's browser
       },
     });
 
+    // Non-JSON tail — under last-write-wins this is just another accepted push
+    // (no conflict), so it emits the same progress/complete frames.
     const incomingContent = `${line1}\n${line2}\nnot-valid-json\n`;
 
     const user = connect(`ws://127.0.0.1:${port}/ws/user?token=${token}`);
@@ -416,14 +418,24 @@ describe("push -> live sync-progress/sync-complete to the pushing user's browser
       content: incomingContent,
       base_hash: null,
     });
-    expect(res.status).toBe(409);
-    expect(res.body.status).toBe("conflict");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("accepted");
 
-    // The conflict path still fires a "notification" frame (via NotifyService),
-    // so drain past that while asserting sync-progress/sync-complete never show.
-    await user.nextMessageOfType("notification");
-    await user.expectNoMessageOfType("sync-progress");
-    await user.expectNoMessageOfType("sync-complete");
+    const progress = await user.nextMessageOfType("sync-progress");
+    expect(progress).toMatchObject({
+      type: "sync-progress",
+      projectId: project.id,
+      machineId: machine.id,
+      filename,
+      phase: "push",
+    });
+
+    const complete = await user.nextMessageOfType("sync-complete");
+    expect(complete).toMatchObject({
+      type: "sync-complete",
+      projectId: project.id,
+      machineId: machine.id,
+    });
 
     user.ws.close();
   });

@@ -147,7 +147,6 @@ describe("RealtimeProvider", () => {
 
     const calledKeys = spy.mock.calls.map((call) => call[0]?.queryKey);
     expect(calledKeys).toContainEqual(["projects", 3]);
-    expect(calledKeys).toContainEqual(["projects", 3, "conflicts"]);
     expect(calledKeys).toContainEqual(["dashboard", "metrics"]);
     expect(calledKeys).toContainEqual(["dashboard", "activity"]);
   });
@@ -168,7 +167,6 @@ describe("RealtimeProvider", () => {
 
     const calledKeys = spy.mock.calls.map((call) => call[0]?.queryKey);
     expect(calledKeys).toContainEqual(["projects", 3]);
-    expect(calledKeys).toContainEqual(["projects", 3, "conflicts"]);
     expect(calledKeys).toContainEqual(["dashboard", "metrics"]);
     expect(calledKeys).toContainEqual(["dashboard", "activity"]);
   });
@@ -207,7 +205,6 @@ describe("RealtimeProvider", () => {
     expect(screen.getByTestId("progress").textContent).toBe("idle");
     const calledKeys = spy.mock.calls.map((call) => call[0]?.queryKey);
     expect(calledKeys).toContainEqual(["projects", 3]);
-    expect(calledKeys).toContainEqual(["projects", 3, "conflicts"]);
     expect(calledKeys).toContainEqual(["dashboard", "metrics"]);
     expect(calledKeys).toContainEqual(["dashboard", "activity"]);
   });
@@ -228,27 +225,6 @@ describe("RealtimeProvider", () => {
     const calledKeys = spy.mock.calls.map((call) => call[0]?.queryKey);
     expect(calledKeys).toContainEqual(["notifications"]);
     expect(toastMock).toHaveBeenCalledWith("t");
-  });
-
-  it("toasts on a conflict message and invalidates conflicts", () => {
-    const qc = new QueryClient();
-    const spy = vi.spyOn(qc, "invalidateQueries");
-    renderProvider(qc);
-    spy.mockClear();
-
-    act(() => {
-      latestSocket().emitMessage({
-        type: "conflict",
-        projectId: 3,
-        filename: "b.txt",
-        conflictId: 9,
-      });
-    });
-
-    const calledKeys = spy.mock.calls.map((call) => call[0]?.queryKey);
-    expect(calledKeys).toContainEqual(["conflicts"]);
-    expect(calledKeys).toContainEqual(["projects", 3, "conflicts"]);
-    expect(toastMock).toHaveBeenCalledWith("Conflict in b.txt");
   });
 
   it("does a full catch-up invalidateQueries() with no args on open", () => {

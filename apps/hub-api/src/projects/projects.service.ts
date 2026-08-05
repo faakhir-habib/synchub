@@ -10,7 +10,6 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { REALTIME_PORT } from "../realtime/realtime.port.js";
 import type { RealtimePort } from "../realtime/realtime.port.js";
 import type {
-  Conflict,
   Project,
   ProjectCreateRequest,
   ProjectDetail,
@@ -202,24 +201,6 @@ export class ProjectsService {
     this.realtime.triggerSync(project.id);
 
     return { status: "triggered" };
-  }
-
-  async listOpenConflicts(userId: number, projectId: number): Promise<Conflict[]> {
-    await this.findOwnedOrThrow(userId, projectId);
-
-    const conflicts = await this.prisma.conflict.findMany({
-      where: { project_id: projectId, status: "open" },
-      orderBy: { created_at: "desc" },
-    });
-
-    return conflicts.map((c) => ({
-      id: c.id,
-      project_id: c.project_id,
-      filename: c.filename,
-      status: c.status as Conflict["status"],
-      auto_merged: c.auto_merged !== 0,
-      created_at: c.created_at.toISOString(),
-    }));
   }
 
   private async findOwnedOrThrowWithMessage(

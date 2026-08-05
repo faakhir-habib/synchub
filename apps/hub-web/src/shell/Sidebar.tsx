@@ -1,13 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import {
-  LayoutDashboard,
-  FolderKanban,
-  Server,
-  GitPullRequestArrow,
-  Bell,
-  Settings,
-  X,
-} from "lucide-react";
+import { LayoutDashboard, FolderKanban, Server, Bell, Settings, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PresenceDot, type PresenceDotProps } from "@/components/PresenceDot";
 import { useRealtimeStatus } from "@/realtime/realtime-provider";
@@ -16,7 +8,6 @@ const NAV_ITEMS = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { to: "/projects", label: "Projects", icon: FolderKanban, exact: false },
   { to: "/machines", label: "Machines", icon: Server, exact: false },
-  { to: "/conflicts", label: "Conflicts", icon: GitPullRequestArrow, exact: false },
   { to: "/notifications", label: "Notifications", icon: Bell, exact: false },
   { to: "/settings", label: "Settings", icon: Settings, exact: false },
 ] as const;

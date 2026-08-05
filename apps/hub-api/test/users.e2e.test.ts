@@ -186,9 +186,7 @@ describe("GET /api/auth/me", () => {
       name: null,
       notify_webhook_url: null,
     });
-    expect(typeof res.body.notify_conflicts).toBe("boolean");
     expect(typeof res.body.notify_sync).toBe("boolean");
-    expect(res.body.notify_conflicts).toBe(true);
     expect(res.body.notify_sync).toBe(true);
   });
 });
@@ -206,19 +204,18 @@ describe("PUT /api/auth/me", () => {
     const res = await request(app.getHttpServer())
       .put("/api/auth/me")
       .set("Authorization", `Bearer ${token}`)
-      .send({ name: longName, notify_conflicts: false });
+      .send({ name: longName, notify_sync: false });
 
     expect(res.status).toBe(200);
     expect(res.body.name).toBe("n".repeat(120));
-    expect(res.body.notify_conflicts).toBe(false);
-    expect(res.body.notify_sync).toBe(true); // untouched field stays default
+    expect(res.body.notify_sync).toBe(false);
 
     // Persisted: re-fetch via /me.
     const me = await request(app.getHttpServer())
       .get("/api/auth/me")
       .set("Authorization", `Bearer ${token}`);
     expect(me.body.name).toBe("n".repeat(120));
-    expect(me.body.notify_conflicts).toBe(false);
+    expect(me.body.notify_sync).toBe(false);
   });
 
   it("persists notify_webhook_url set and clear via PUT /me", async () => {

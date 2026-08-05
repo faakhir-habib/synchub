@@ -17,10 +17,13 @@ export const PushRequest = z.object({
 export type PushRequest = z.infer<typeof PushRequest>;
 export type PushRequestInput = z.input<typeof PushRequest>;
 
+// Sync is last-write-wins: a push either lands as the new canonical
+// ("accepted") or the Hub already had this exact content ("unchanged").
+// There is no merge/behind/conflict outcome — the incoming version always
+// wins when it differs.
 export const PushResponse = z.object({
-  status: z.enum(["accepted", "unchanged", "merged", "behind", "conflict"]),
+  status: z.enum(["accepted", "unchanged"]),
   hash: z.string().optional(),
-  conflictId: z.number().int().optional(),
 });
 export type PushResponse = z.infer<typeof PushResponse>;
 

@@ -49,7 +49,6 @@ const ME = {
   email: "ada@example.com",
   name: "Ada Lovelace",
   notify_webhook_url: null,
-  notify_conflicts: true,
   notify_sync: true,
 };
 

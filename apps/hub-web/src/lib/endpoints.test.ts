@@ -60,7 +60,6 @@ describe("api client", () => {
     const metrics = {
       projects: { total: 3, syncing: 1 },
       machines: { total: 2, online: 1 },
-      openConflicts: 0,
       eventsToday: 5,
       dataTransferredBytes: 1024,
       sessionsSyncedToday: 4,

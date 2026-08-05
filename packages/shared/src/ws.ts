@@ -56,14 +56,6 @@ export const WsSyncComplete = z.object({
   at: z.string(),
 });
 
-// --- Browser-directed: live conflict surfacing (NEW) ---
-export const WsConflict = z.object({
-  type: z.literal("conflict"),
-  projectId: z.number().int(),
-  filename: z.string(),
-  conflictId: z.number().int(),
-});
-
 // --- Browser-directed: notification ---
 export const WsNotification = z.object({
   type: z.literal("notification"),
@@ -82,7 +74,6 @@ export const WsMessage = z.discriminatedUnion("type", [
   WsPresence,
   WsSyncProgress,
   WsSyncComplete,
-  WsConflict,
   WsNotification,
 ]);
 export type WsMessage = z.infer<typeof WsMessage>;
